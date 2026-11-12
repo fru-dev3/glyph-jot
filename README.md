@@ -93,6 +93,25 @@ summarizes and reads the library. Tests: the `JotMac` scheme and `swift test` in
 
 ## Versions
 
+- **0.7.19** (2026-10-31): nothing written while the notes folder was away stays behind. Dictations
+  and thoughts taken while it was unreachable are folded back into it at the next launch, line by
+  line for the logs and carried whole into a free name for everything else; the Dictionary is never
+  merged or written over. Settings is a pane of the library, and Command-comma still opens it.
+- **0.7.18** (2026-10-30): file a note anywhere without moving it. "File to..." searches every place
+  in the vault, adds a line to that place's `linked-notes.md` and a `links:` entry to the note, with
+  Undo. Up to three suggested places and tags appear as chips under the title. The "..." menu has
+  Copy Path. Chat files too ("file this under Acme").
+- **0.7.17** (2026-10-29): a note's date title wraps to a second line instead of being cut off at the
+  narrowest window.
+- **0.7.16** (2026-10-28): design pass. Search sits at the toolbar's trailing edge; Record is a card at
+  the foot of the sidebar with the time, level, Pause and Stop; Settings is a sidebar of panes. Tags
+  and links live in each note's front matter as `entities: [person/...]`. Jot to a domain by saying
+  it first ("Health: ...") or picking it after.
+- **0.7.15** (2026-10-28): New Note. A + beside the Notes title (and File > New Note, Cmd-N) opens a
+  field to type a note, or hold Fn and say it into the field; Cmd-Return saves it. A note that can't
+  be written stays on screen with the reason.
+- **0.7.14** (2026-10-26): who spoke when. Recordings are split by speaker on the Mac, voices can be
+  named and linked to People, and the player scrubs on a waveform colored by speaker.
 - **0.7.13** (2026-10-25): every capture says where it came from. A recording's `meta.json` keeps
   the Mac's name as `device`, shown beside its date and length; each dictation line keeps it too.
   The sidebar opens with the app's icon, name and "Personal context".

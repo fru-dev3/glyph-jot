@@ -16,14 +16,27 @@ extension Animation {
 // MARK: links
 
 extension Link {
+    /// One of Fru's canonical tags wears its own colour, the same hue the iPhone draws.
+    /// nil for anything else, which keeps the window's tint.
+    var tagColor: Color? {
+        if case .tag(let t) = self { return CanonicalTags.color(t) }
+        return nil
+    }
+
     var symbol: String {
         if case .tag = self { return "number" }
+        if case .object(let id) = self, id.hasPrefix("domain/") { return VaultDomains.symbol(String(id.dropFirst(7))) }
         return studioKind?.symbol ?? "link"
     }
 
     /// What a chip says: the Studio object's name, the new name, or the tag.
+    /// Two entities of one name (two Johns) read with their page's name beside them.
     @MainActor var label: String {
-        if case .object(let id) = self { return AppModel.shared.studio.name(id) }
+        if case .object(let id) = self {
+            let studio = AppModel.shared.studio
+            if let o = studio.object(id), !studio.namesakes(o).isEmpty { return "\(o.name) \u{00B7} \(id.split(separator: "/").last ?? "")" }
+            return studio.name(id)
+        }
         return name
     }
 
@@ -154,13 +167,14 @@ struct MetaChip: View {
 
 // MARK: the add field
 
-/// "+" that opens into a field which finds a Studio domain, person, product or project, or a
-/// #tag, or makes a new person or product in Studio.
+/// "+" that opens into a field which finds a Glyph CRM person, place, product or thing (or a
+/// Studio project or domain), or a #tag, or makes a new entity in the CRM. Two of one name show
+/// what tells them apart, so the pick is never the wrong John.
 struct LinkAddField: View {
     enum Style { case overlay, inline }
 
     var style: Style = .overlay
-    var placeholder = "File under a domain, person, product, project or #tag"
+    var placeholder = "Link a person, place, product, thing or #tag"
     var excluding: Set<Link> = []
     /// Opens with this text (from a request), when it changes.
     var request: (id: Int, prefix: String) = (0, "")
@@ -194,7 +208,8 @@ struct LinkAddField: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("File under a domain, person, product, project or #tag")
+                .help("Link a person, place, product or thing from Glyph CRM, or add a #tag. Saved in the file itself.")
+                .accessibilityIdentifier("add-link")
             }
         }
         .onChange(of: request.id) {
@@ -223,7 +238,7 @@ struct LinkAddField: View {
             .onAppear { if !alwaysOpen { focused = true } }
             .overlay(alignment: .topLeading) {
                 if style == .overlay, !candidates.isEmpty, focused {
-                    list.frame(width: 280).offset(y: 32)
+                    list.frame(width: 320).offset(y: 32)
                 }
             }
             .zIndex(10)
@@ -237,13 +252,28 @@ struct LinkAddField: View {
             ForEach(Array(candidates.enumerated()), id: \.element) { i, c in
                 Button { add(c) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: c.isNew ? "plus.circle" : c.link.symbol)
+                        Image(systemName: c.isNew ? "plus.circle" : c.newKind?.symbol ?? c.link.symbol)
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 16)
-                            .foregroundStyle(i == highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
-                        Text(c.isNew ? "New \(c.link.kindName) \u{201C}\(c.link.label)\u{201D}" : c.link.label)
-                            .font(.system(size: 13))
-                            .lineLimit(1)
+                            .foregroundStyle(i == highlighted ? AnyShapeStyle(.white)
+                                             : c.link.tagColor.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(c.isNew ? "New \((c.newKind?.singular.lowercased()) ?? c.link.kindName) \u{201C}\(c.link.label)\u{201D}"
+                                 : c.detail != nil ? model.studio.name(c.link.name) : c.link.label)
+                                .font(.system(size: 13))
+                                .lineLimit(1)
+                            // One of Fru's canonical tags says what it covers, under its name.
+                            if case .tag(let t) = c.link, let covers = CanonicalTags.covers(t) {
+                                Text(covers)
+                                    .font(.system(size: 11))
+                                    .lineLimit(1)
+                                    .foregroundStyle(i == highlighted ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(.secondary))
+                            }
+                        }
+                        if let detail = c.detail {
+                            Text(detail).font(.system(size: 11.5)).lineLimit(1)
+                                .foregroundStyle(i == highlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
+                        }
                         Spacer(minLength: 8)
                         if !c.isNew, c.count > 0 {
                             Text("\(c.count)").font(.system(size: 12)).monospacedDigit()
@@ -251,7 +281,8 @@ struct LinkAddField: View {
                         }
                     }
                     .padding(.horizontal, 8)
-                    .frame(height: 26)
+                    .padding(.vertical, 3)
+                    .frame(minHeight: 26)
                     .foregroundStyle(i == highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .background(i == highlighted ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 6))
                     .contentShape(Rectangle())
@@ -272,7 +303,12 @@ struct LinkAddField: View {
     }
 
     private func add(_ c: Candidate) {
-        animate { onAdd(c.link) }
+        if let kind = c.newKind {
+            let name = c.link.name
+            Task { if let id = await model.createEntity(kind, name) { animate { onAdd(.object(id)) } } }
+        } else {
+            animate { onAdd(c.link) }
+        }
         text = ""
         highlighted = 0
         focused = true
@@ -424,6 +460,12 @@ struct BannerView: View {
         case .relaunch:
             Button("Relaunch") { AppModel.relaunch() }
                 .controlSize(.small)
+        case .unfile(let note, let place):
+            Button("Undo") {
+                model.dismiss(banner)
+                NoteFiling.shared.unfile(note: note, place: place)
+            }
+            .controlSize(.small)
         }
     }
 }
@@ -440,5 +482,84 @@ struct StageIcon: View {
             .symbolEffect(.variableColor.iterative, options: .repeating, isActive: !reduceMotion)
             .help(stage.help)
             .accessibilityLabel(stage.help)
+    }
+}
+
+// MARK: the family's green, and the two marks it wears
+
+extension Color {
+    /// Green that is legible as words in both appearances. The accent `#008000` is a fill: on
+    /// near-black it fails 4.5:1, so headings, ticks and action labels take this instead, and the
+    /// accent keeps the shapes. `#4aa96c` on dark, a darker office green on white.
+    static let glyphGreenText = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.290, green: 0.663, blue: 0.424, alpha: 1)
+            : NSColor(srgbRed: 0, green: 0.400, blue: 0, alpha: 1)
+    })
+    /// The same green, one step quieter: the date beside a section heading.
+    static let glyphGreenQuiet = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.416, green: 0.620, blue: 0.478, alpha: 1)
+            : NSColor(srgbRed: 0.145, green: 0.420, blue: 0.231, alpha: 1)
+    })
+}
+
+/// A section's name: small, uppercase and green, because grey reads as "less important words"
+/// rather than "a different kind of thing". Its date, when it has one, sits beside it.
+struct SectionHeading: View {
+    let title: String
+    var detail: String?
+    var trailing: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 11.5, weight: .semibold))
+                .kerning(0.6)
+                .foregroundStyle(Color.glyphGreenText)
+            if let detail {
+                Text(detail.uppercased())
+                    .font(.system(size: 11.5, weight: .medium))
+                    .kerning(0.4)
+                    .foregroundStyle(Color.glyphGreenQuiet)
+            }
+            if let trailing {
+                Spacer(minLength: 8)
+                Text(trailing)
+                    .font(.system(size: 11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Vault state, and nothing else. One grey tick is waiting, two green are in the vault, words and
+/// audio. It is never words, and nothing that is not vault state is ever allowed to borrow it.
+struct VaultTicks: View {
+    /// The words are in the vault too, not only the sound.
+    let kept: Bool
+
+    var body: some View {
+        Canvas { ctx, _ in
+            let colour = kept ? Color.glyphGreenText : Color.secondary
+            var first = Path()
+            first.move(to: CGPoint(x: kept ? 1 : 4, y: 6.5))
+            first.addLine(to: CGPoint(x: kept ? 4.2 : 7.2, y: 9.7))
+            first.addLine(to: CGPoint(x: kept ? 10.5 : 13.5, y: 3))
+            ctx.stroke(first, with: .color(colour), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            guard kept else { return }
+            var second = Path()
+            second.move(to: CGPoint(x: 8.2, y: 9.7))
+            second.addLine(to: CGPoint(x: 9.4, y: 11))
+            second.addLine(to: CGPoint(x: 15.7, y: 3.6))
+            ctx.stroke(second, with: .color(colour), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        }
+        .frame(width: 20, height: 14)
+        .accessibilityElement()
+        .accessibilityAddTraits(.isImage)
+        .accessibilityLabel(kept ? "In the vault, words and audio" : "In the vault; the words are still coming")
+        .help(kept ? "In the vault, words and audio" : "The sound is in the vault; the words are still coming")
     }
 }

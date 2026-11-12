@@ -1,4 +1,5 @@
 import AVFoundation
+import GlyphCore
 import SwiftUI
 
 /// Plays a conversation's audio, with the time for the scrubber and the transcript.
@@ -63,9 +64,12 @@ final class AudioPlayer {
     }
 }
 
-/// Play, the scrubber and the times, pinned under the transcript.
+/// Play, the scrubber and the times, pinned under the transcript. Once the recording's
+/// waveform is read, it is the scrubber, colored by who speaks.
 struct PlayerBar: View {
     let player: AudioPlayer
+    var peaks: [Float] = []
+    var segments: [Transcript.Segment] = []
     @State private var scrub: Double?
 
     var body: some View {
@@ -100,14 +104,20 @@ struct PlayerBar: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 40, alignment: .trailing)
-            Slider(value: Binding(get: { scrub ?? player.time }, set: { scrub = $0 }),
-                   in: 0...max(player.duration, 0.1)) { editing in
-                if !editing, let s = scrub {
-                    player.seek(s, play: player.playing)
-                    scrub = nil
+            if peaks.isEmpty {
+                Slider(value: Binding(get: { scrub ?? player.time }, set: { scrub = $0 }),
+                       in: 0...max(player.duration, 0.1)) { editing in
+                    if !editing, let s = scrub {
+                        player.seek(s, play: player.playing)
+                        scrub = nil
+                    }
                 }
+                .controlSize(.small)
+            } else {
+                SpeakerWaveform(peaks: peaks, segments: segments, time: scrub ?? player.time, duration: player.duration,
+                                onScrub: { scrub = $0 }, onSeek: { player.seek($0, play: true) })
+                    .help("Click to play from there")
             }
-            .controlSize(.small)
             Text(Format.clock(player.duration))
                 .font(.system(size: 12.5, weight: .medium))
                 .monospacedDigit()

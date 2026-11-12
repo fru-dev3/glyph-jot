@@ -7,7 +7,17 @@ struct RecordCommands: Commands {
 
     var body: some Commands {
         SidebarCommands()
+        // Command-comma and the App menu: Settings opens in the window, not over it.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings\u{2026}") { model.showSettings() }
+                .keyboardShortcut(",")
+        }
         CommandGroup(replacing: .newItem) {
+            Button("New Note") {
+                model.sidebar = .notes
+                model.writingNote = true
+            }
+            .keyboardShortcut("n")
             Button(model.isRecording ? "Stop Recording" : "New Recording") { model.toggleRecording() }
                 .keyboardShortcut("r")
             Button(model.recorder.state == .paused ? "Resume Recording" : "Pause Recording") {
@@ -44,9 +54,13 @@ struct RecordCommands: Commands {
             Button("File Under\u{2026}") { model.addLinkRequest = (model.addLinkRequest.id + 1, "") }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(id == nil)
+            Button("Link Older Notes to Glyph CRM\u{2026}") { model.reviewingLinks = true }
             Divider()
             Button("Copy as Markdown") { if let id { model.copyMarkdown(id) } }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(id == nil)
+            Button("Copy Transcript") { if let id { model.copyTranscript(id) } }
+                .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(id == nil)
             Button("Reveal in Finder") { if let id { model.reveal(id) } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -72,7 +86,6 @@ struct RecordCommands: Commands {
 struct MenuBarContent: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
     private let engine = Engine.shared
 
     var body: some View {
@@ -128,7 +141,8 @@ struct MenuBarContent: View {
     }
 
     private func settings() {
-        openSettings()
+        openWindow(id: "library")
+        model.showSettings()
         NSApp.activate()
     }
 }

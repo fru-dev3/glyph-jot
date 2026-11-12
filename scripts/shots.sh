@@ -51,7 +51,14 @@ win() { local kind=${1:-} # the window number of the library (or the first other
   hook "windows:$demo/w.json" 0.5
   python3 -c "import json,sys; w=json.load(open('$demo/w.json')); big=[x for x in w if not x['panel'] and x['w'] > 300]; lib=[x for x in big if x['title']=='Glyph Jot']; pick=[x for x in w if x['panel']] if '$kind'=='panel' else ([x for x in big if x['title']!='Glyph Jot'] if '$kind'=='other' else lib); print(pick[0]['number'] if pick else '')"
 }
-shot() { local n=$(win ${2:-}); [[ -n $n ]] && screencapture -x -o -l$n "$out/$1.png" && echo "$1"; }
+shot() { local n=$(win ${2:-})
+  [[ -n $n ]] && screencapture -x -o -l$n "$out/$1.png" 2>/dev/null
+  # Over ssh (the shots run on a remote Mac) there is no Screen Recording permission, so
+  # screencapture writes nothing. The app draws its own window instead, which needs none. It
+  # cannot draw a panel, so a panel shot is simply missing there.
+  if [[ ! -s $out/$1.png && ${2:-} != panel ]]; then hook "snap:$out/$1.png" 0.4; fi
+  [[ -s $out/$1.png ]] && echo "$1"
+}
 conv=Work/Acme/$(ls $demo/rec/Work/Acme | grep -v '^_' | grep kickoff | head -1)
 linked=$(python3 -c "import json,glob; print([json.load(open(f))['id'] for f in glob.glob('$demo/rec/**/meta.json', recursive=True) if 'jots' in json.load(open(f))][0])")
 for look in light dark; do
@@ -62,16 +69,17 @@ for look in light dark; do
     hook "side:recordings"; hook "conv:$conv"; hook "tab:summary" 1.2; shot "$look-$size-recording-summary"
     hook "side:notes" 1.2; shot "$look-$size-notes"
     hook "side:dictations" 1.5; shot "$look-$size-dictations"
-    hook "side:object:person/sam-lee" 1.2; shot "$look-$size-person"
+    hook "side:object:person/ken-lee" 1.2; shot "$look-$size-person"
     [[ $size == 1280x800 ]] || continue
     hook "side:object:org/acme" 1.2; shot "$look-$size-product"
     hook "side:object:domain/career" 1.2; shot "$look-$size-domain"
     hook "side:object:mission/kitchen-remodel" 1.2; shot "$look-$size-project"
     hook "side:recordings"; hook "conv:$linked"; hook "tab:transcript" 1.2; shot "$look-$size-transcript-with-jots"
-    # Settings and the recorder panel come to the front: only when nobody is at the Mac.
+    # Settings is a pane of the library, so it is captured like any other pane.
+    hook "settings" 1.5; shot "$look-settings-jot"; hook "closesettings"
+    # The recorder panel comes to the front: only when nobody is at the Mac.
     idle=$(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}')
-    (( idle >= 300 )) || { echo "skipped settings and recorder shots (Mac in use)"; continue; }
-    hook "settings" 1.5; shot "$look-settings-jot" other; hook "closesettings"
+    (( idle >= 300 )) || { echo "skipped the recorder shots (Mac in use)"; continue; }
     hook "side:recordings"; hook "feed:/System/Library/Sounds/Submarine.aiff"; hook "record:start" 2.5
     hook "jot:on" 1.2; shot "$look-recorder-jotting" panel
     hook "jot:off" 1; shot "$look-recorder-after-jot" panel

@@ -74,8 +74,7 @@ enum JotIDs {
 
 /// "0.7 (12)", from the app's Info.plist (the engine carries Glyph Jot's version).
 enum Version {
-    static var text: String {
-        let info = Bundle.main.infoDictionary
-        return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
-    }
+    static var number: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?" }
+    static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?" }
+    static var text: String { "\(number) (\(build))" }
 }

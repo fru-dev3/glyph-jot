@@ -33,7 +33,7 @@ hook() { app_post dev.fru.jot.mac.app.check "$1"; }      # the app (recording, l
 engine() { app_post dev.fru.jot.mac.check "$1"; }        # the dictation engine
 
 # The meeting: A, then B (what gets jotted), then C, then quiet for the note.
-A="Sam wants the Acme renewal signed before the budget freeze."
+A="Ken wants the Acme renewal signed before the budget freeze."
 B="Remind me to book the dentist on Thursday."
 C="We will hold this year's price for two years."
 N="Call the plumber about the kitchen sink."

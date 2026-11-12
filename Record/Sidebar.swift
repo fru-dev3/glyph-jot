@@ -2,7 +2,7 @@ import GlyphCore
 import SwiftUI
 
 /// The captures first (All, Notes, Dictations, Recordings), then what they are filed under in
-/// Glyph Studio: Domains, People, Products and Projects, by Studio's names, each with how
+/// Glyph Bot: Domains, People, Products and Projects, by Studio's names, each with how
 /// many captures it has. Only objects something is filed under are listed; Studio keeps the
 /// rest. #tags last, plain (Studio has no tags).
 struct Sidebar: View {
@@ -15,6 +15,7 @@ struct Sidebar: View {
         let counts = model.linkCounts
         let recordings = model.library.conversations.count
 
+        VStack(spacing: 0) {
         List(selection: $model.sidebar) {
             Section {
                 row("All", "square.stack.3d.up", recordings + notes.notes.count + notes.dictationCount).tag(SidebarItem.all)
@@ -26,7 +27,7 @@ struct Sidebar: View {
             ForEach(sections(counts.objects), id: \.kind) { section in
                 Section(isExpanded: open(section.kind.rawValue)) {
                     ForEach(section.rows) { r in
-                        row(r.name, section.kind.symbol, r.count).tag(SidebarItem.object(r.id))
+                        row(r.name, section.kind == .domain ? VaultDomains.symbol(String(r.id.dropFirst(7))) : section.kind.symbol, r.count).tag(SidebarItem.object(r.id))
                     }
                 } header: {
                     Text(section.kind.label)
@@ -37,7 +38,7 @@ struct Sidebar: View {
             if !tags.isEmpty {
                 Section(isExpanded: open("tags")) {
                     ForEach(tags, id: \.key) { t in
-                        row(t.key, "number", t.value).tag(SidebarItem.tag(t.key))
+                        row(t.key, "number", t.value, tint: CanonicalTags.color(t.key)).tag(SidebarItem.tag(t.key))
                     }
                 } header: {
                     Text("Tags")
@@ -46,22 +47,32 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top, spacing: 0) { brand }
+        // The list ends above the Record card, with a divider: no row ever shows beneath it.
+        Divider().padding(.horizontal, 10)
+        RecordDock().padding(.top, 10)
+        }
     }
 
-    /// Which app this is, at the top: the icon, the name and what it's for.
+    /// Which app this is, at the top: the icon, the name, and the gear. One line, no tagline.
+    /// The gear opens Settings here in the window, never as a page floating over the app.
     private var brand: some View {
         HStack(spacing: 10) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable().interpolation(.high)
                 .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Glyph Jot").font(.system(size: 15, weight: .semibold))
-                Text("Personal context").font(.system(size: 12)).foregroundStyle(.secondary)
-            }
+            Text("Glyph Jot").font(.system(size: 15, weight: .semibold))
             Spacer(minLength: 0)
+            Button { model.sidebar = .settings } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(model.sidebar == .settings ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .frame(width: 26, height: 26).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings: version, where Jot saves, dictation, recording (Command-comma)")
+            .accessibilityIdentifier("settings")
         }
         .padding(.horizontal, 14).padding(.top, 4).padding(.bottom, 8)
-        .accessibilityElement(children: .combine)
     }
 
     struct Row: Identifiable { var id: String; var name: String; var count: Int }
@@ -77,11 +88,12 @@ struct Sidebar: View {
         }
     }
 
-    private func row(_ title: String, _ symbol: String, _ count: Int) -> some View {
+    /// `tint` is a canonical tag's own colour; every other row keeps the sidebar's.
+    private func row(_ title: String, _ symbol: String, _ count: Int, tint: Color? = nil) -> some View {
         Label {
             Text(title).lineLimit(1)
         } icon: {
-            Image(systemName: symbol)
+            Image(systemName: symbol).foregroundStyle(tint ?? Color.accentColor)
         }
         .badge(count)
     }

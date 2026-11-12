@@ -64,8 +64,8 @@ struct ConversationList: View {
 
     private func filedNotes(_ item: SidebarItem) -> [JotNote] {
         var notes = model.notes(for: item)
-        // A person by full name, alias or first name ("Sam" for Sam Lee); a product by name or alias.
-        if case .object(let id) = item, let o = model.studio.object(id), o.kind == .person || o.kind == .product {
+        // A person by full name, alias or first name ("Ken" for Ken Lee); a product by name or alias.
+        if case .object(let id) = item, let o = model.studio.object(id), o.kind == .person || o.kind == .org {
             let first = o.kind == .person ? [String(o.name.split(separator: " ").first ?? "")] : []
             for n in notesMentioning([o.name] + first + o.aliases) where !notes.contains(n) { notes.append(n) }
         }
@@ -177,6 +177,7 @@ struct ConversationMenu: View {
         }
         Divider()
         Button("Copy as Markdown") { model.copyMarkdown(id) }
+        Button("Copy Transcript") { model.copyTranscript(id) }
         Button("Reveal in Finder") { model.reveal(id) }
         if model.stage(id) == nil, model.recordingID != id {
             Button("Transcribe and Summarize Again") { Task { await model.process(id) } }

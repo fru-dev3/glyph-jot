@@ -180,20 +180,68 @@ enum Transcription {
         }
     }
 
-    /// Transcribes a saved recording start to finish.
+    /// What one run over a saved recording got: the words, and every phrase with its place on
+    /// the recording's clock, and the error that stopped it if one did.
+    ///
+    /// The error comes back beside the words instead of thrown, because a run that dies four
+    /// minutes into half an hour still heard four minutes, and those words are the difference
+    /// between a memo that lost its morning and one that kept most of it (board 31).
+    struct Pass {
+        var text = ""
+        var phrases: [Phrase] = []
+        var error: Error?
+    }
+
+    /// One heard phrase on the recording's clock. Its own small type, not GlyphVault's
+    /// `Transcript.Segment`, because Jot on the Mac builds this file and does not link
+    /// GlyphVault by name; `MemoTranscript` on the phone turns these into a transcript.
+    struct Phrase: Sendable {
+        var start: Double
+        var end: Double
+        var text: String
+    }
+
+    /// Where a partial run's words are kept while the run is still going, so they survive the
+    /// throw. The collecting task is the only writer and it has finished before anyone reads.
+    private final class Collected: @unchecked Sendable {
+        var builder = TranscriptBuilder()
+        var phrases: [Transcription.Phrase] = []
+    }
+
+    /// Transcribes a saved recording start to finish, keeping what it got if it stops early.
+    @MainActor
+    static func pass(_ url: URL) async -> Pass {
+        let got = Collected()
+        var failure: Error?
+        do {
+            let m = try await make(live: false)
+            let audio = try AVAudioFile(forReading: url)
+            let collect = Task {
+                for try await piece in m.pieces where piece.isFinal {
+                    got.builder.add(piece)
+                    let words = corrected(piece.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    guard !words.isEmpty else { continue }
+                    got.phrases.append(Phrase(start: CMTimeGetSeconds(piece.range.start),
+                                              end: CMTimeGetSeconds(piece.range.end), text: words))
+                }
+            }
+            let analyzer = SpeechAnalyzer(modules: [m.module])
+            try await analyzer.setContext(context)
+            try await analyzer.start(inputAudioFile: audio, finishAfterFile: true)
+            try await collect.value
+        } catch {
+            failure = error
+        }
+        return Pass(text: got.builder.text, phrases: got.phrases, error: failure)
+    }
+
+    /// Transcribes a saved recording start to finish. Throws only when it got nothing at all:
+    /// with words in hand, those words are the answer.
     @MainActor
     static func file(_ url: URL) async throws -> String {
-        let m = try await make(live: false)
-        let audio = try AVAudioFile(forReading: url)
-        let collect = Task {
-            var builder = TranscriptBuilder()
-            for try await piece in m.pieces where piece.isFinal { builder.add(piece) }
-            return builder.text
-        }
-        let analyzer = SpeechAnalyzer(modules: [m.module])
-        try await analyzer.setContext(context)
-        try await analyzer.start(inputAudioFile: audio, finishAfterFile: true)
-        return try await collect.value
+        let run = await pass(url)
+        if let error = run.error, run.text.isEmpty { throw error }
+        return run.text
     }
 }
 

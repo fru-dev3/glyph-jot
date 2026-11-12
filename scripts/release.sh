@@ -20,6 +20,10 @@ xcodebuild -project Jot.xcodeproj -scheme JotMac -configuration Release -derived
   CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO build # no get-task-allow: notarization refuses it
 app=build/Build/Products/Release/Jot.app
 codesign --verify --strict --deep "$app"
+# A public build carries no source path (the user name, home folder).
+for bin in "$app/Contents/MacOS/"* "$app/Contents/Helpers/"*/Contents/MacOS/*; do
+  if strings -a "$bin" | grep -q '^/Use[r]s/'; then echo "source paths left in $bin"; exit 1; fi
+done
 engine_sig=$(codesign -dvv "$app/Contents/Helpers/Glyph Jot Dictation.app" 2>&1)
 [[ $engine_sig == *"Developer ID Application"* ]] || { echo "the engine is not Developer ID signed"; exit 1; }
 
@@ -31,12 +35,20 @@ hdiutil create -volname "Glyph Jot $version" -srcfolder dist/stage -fs HFS+ -for
 codesign --sign "$identity" --timestamp "$dmg"
 
 echo "notarizing (a few minutes)"
-result=$(xcrun notarytool submit "$dmg" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --timeout 20m)
-echo "$result"
-if ! grep -q "status: Accepted" <<<"$result"; then
-  id=$(awk '/^ *id:/{print $2; exit}' <<<"$result")
-  xcrun notarytool log "$id" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
-  echo "notarization was not accepted (log above)"; exit 1
+# Submit, then poll: --wait has hung on Apple's side for an hour. A hung submission can be
+# resubmitted by running this again.
+id=$(xcrun notarytool submit "$dmg" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" | awk '/^ *id:/ && !s {print $2; s=1}')
+[[ -n $id ]] || { echo "notarize: no submission id"; exit 1; }
+echo "submission $id"
+status=""
+for _ in {1..90}; do
+  status=$(xcrun notarytool info "$id" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" 2>&1 | awk '/^ *status:/ && !s {print $2; s=1}')
+  [[ $status == Accepted || $status == Invalid || $status == Rejected ]] && break
+  sleep 30
+done
+if [[ $status != Accepted ]]; then
+  xcrun notarytool log "$id" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" || true
+  echo "notarization was not accepted (status: ${status:-none})"; exit 1
 fi
 xcrun stapler staple "$dmg"
 

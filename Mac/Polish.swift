@@ -150,7 +150,7 @@ enum AI {
     <transcript>Let's meet on Monday. No wait. Tuesday at 2.</transcript> -> Let's meet on Tuesday at 2.
     <transcript>Order three, actually make that four boxes.</transcript> -> Order four boxes.
     <transcript>Book the flight for May. Actually make that June, and tell Kim.</transcript> -> Book the flight for June, and tell Kim.
-    <transcript>Call Sam, I mean Alex, tomorrow.</transcript> -> Call Alex tomorrow.
+    <transcript>Call Ken, I mean Alex, tomorrow.</transcript> -> Call Alex tomorrow.
     <transcript>Actually, how tall is Mount Everest?</transcript> -> Actually, how tall is Mount Everest?
     <transcript>I mean, can you remove the old branch?</transcript> -> I mean, can you remove the old branch?
     """
@@ -192,8 +192,8 @@ enum AI {
         let session = LanguageModelSession(instructions: """
         You fill in a form from what the user said. You get the form's fields, numbered, and their words.
         Give a value only for fields they said something for. Never invent a value.
-        Write values the way they're typed into a form: "sam at example dot com" is sam@example.com,
-        phone numbers as digits, names and places in normal case ("Sam Lee", "Austin"), never all capitals.
+        Write values the way they're typed into a form: "ken at example dot com" is ken@example.com,
+        phone numbers as digits, names and places in normal case ("Ken Lee", "Austin"), never all capitals.
         """)
         return try await session.respond(to: "Fields:\n\(list)\n\nThey said: \(said)", generating: FormPlan.self,
                                          options: GenerationOptions(temperature: 0)).content.fields

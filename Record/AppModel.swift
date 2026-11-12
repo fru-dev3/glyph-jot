@@ -7,7 +7,9 @@ import SwiftUI
 /// Studio objects they are filed under (by Studio id), then plain #tags.
 enum SidebarItem: Hashable {
     case all, notes, dictations, recordings
+    case chat // Board 25: asking across every jot, with the threads before it
     case object(String), tag(String)
+    case settings // Settings is a place in the window, never a floating page
 
     var link: Link? {
         switch self {
@@ -24,22 +26,24 @@ enum LinkTarget: Hashable {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case summary, transcript
+    case transcript, summary, speakers
     var id: Self { self }
     var title: String {
         switch self {
         case .summary: "Summary"
         case .transcript: "Transcript"
+        case .speakers: "Who spoke"
         }
     }
 }
 
 /// What the background work is doing to a conversation.
 enum Stage: Equatable {
-    case transcribing(Double), downloadingModel(Double), summarizing, linking
+    case findingSpeakers, transcribing(Double), downloadingModel(Double), summarizing, linking
 
     var symbol: String {
         switch self {
+        case .findingSpeakers: "person.2.wave.2"
         case .transcribing, .downloadingModel: "waveform"
         case .summarizing: "sparkles"
         case .linking: "person.crop.circle.badge.questionmark"
@@ -48,6 +52,7 @@ enum Stage: Equatable {
 
     var help: String {
         switch self {
+        case .findingSpeakers: "Finding who spoke"
         case .transcribing(let p): "Transcribing \(Int(p * 100))%"
         case .downloadingModel(let p): "Downloading the speech model \(Int(p * 100))%"
         case .summarizing: "Writing the summary"
@@ -60,6 +65,8 @@ enum Stage: Equatable {
 struct Banner: Equatable, Identifiable {
     enum Fix: Equatable {
         case none, retry(String), settings(String), relaunch
+        /// Undo a filing (Glyph Jot's File to): the note's vault path and the place's.
+        case unfile(note: String, place: String)
     }
     let id = UUID()
     var message: String
@@ -74,13 +81,13 @@ final class AppModel {
 
     private(set) var library: Library
     var vault: Vault { library.vault }
-    /// Glyph Studio's people, products, projects and domains, from the notes vault.
+    /// Glyph CRM's people, places, products and things, and Studio's projects and domains, from the vault files.
     private(set) var studio = StudioDirectory()
 
     // Selection and layout
     var sidebar: SidebarItem? = .all { didSet { if oldValue != sidebar { syncSelection() } } }
     var selectedID: String?
-    var tab: DetailTab = .summary
+    var tab: DetailTab = .transcript
     var columns: NavigationSplitViewVisibility = .all
     var showList = true
     var listWidth: CGFloat = 300
@@ -91,6 +98,20 @@ final class AppModel {
     var searchFocused = false
     var quickOpen = false
 
+    // Vault presence
+    var isVaultPresent: Bool {
+        FileManager.default.fileExists(atPath: vault.root.path)
+    }
+
+    /// Explicitly re-reads the vault and updates state. On vault absence, snapshot is wiped.
+    func reload() {
+        if !isVaultPresent {
+            studio = StudioDirectory()
+            selectedID = nil
+        }
+        library.reload()
+    }
+
     // Work in the background, and what went wrong
     private(set) var stages: [String: Stage] = [:]
     var banners: [Banner] = []
@@ -98,9 +119,14 @@ final class AppModel {
     // Requests views answer (focus the title, open the add field)
     var renameRequest = 0
     var addLinkRequest: (id: Int, prefix: String) = (0, "")
+    /// The "Link older notes" sheet, and a debug hook's press of its Link button.
+    var reviewingLinks = false
+    var reviewApply = 0
 
     // Recording
     let recorder = Recorder()
+    /// The words while it records, straight onto the screen (LiveTranscript.swift).
+    let live = LiveTranscript()
     private(set) var recordingID: String?
     var includeSystemAudio: Bool {
         didSet { UserDefaults.standard.set(includeSystemAudio, forKey: "includeSystemAudio") }
@@ -134,7 +160,7 @@ final class AppModel {
         guard !AppModel.testHost, let root = studioRoot, !studio.objects(.domain).isEmpty else { return }
         let vault = vault, studio = studio
         let report = await Task.detached(priority: .utility) {
-            try? vault.migrateToStudio(studio) { kind, name, notes in StudioCommand.create(kind, name, notes: notes, vault: root) }
+            try? vault.migrateToStudio(studio) { kind, name, notes in EntityPage.create(kind, name, notes: notes, in: root) }
         }.value
         guard let report, !report.isEmpty else { return }
         for r in report.rows { jotLog.notice("studio: \(r.name, privacy: .public) is \(r.id, privacy: .public)\(r.created ? " (new)" : "", privacy: .public)") }
@@ -158,13 +184,21 @@ final class AppModel {
 
     /// `-recordingsPath <folder>` (tests) or the chosen folder; else Memosa's vault if there,
     /// else ~/Documents/Glyph Vault. ("vaultPath" is the notes folder, Jot's older setting.)
+    /// The configured recordings vault path, if any.
+    static func configuredRecordingsPath() -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: "recordingsPath"), !path.isEmpty else { return nil }
+        return URL(filePath: (path as NSString).expandingTildeInPath, directoryHint: .isDirectory)
+    }
+
+    /// The recordings vault root. Never silently substitutes another directory when the configured vault is absent.
     static func vaultRoot() -> URL {
-        if let path = UserDefaults.standard.string(forKey: "recordingsPath"), !path.isEmpty {
-            return URL(filePath: (path as NSString).expandingTildeInPath, directoryHint: .isDirectory)
+        if let configured = configuredRecordingsPath() {
+            return configured
         }
         let docs = URL.documentsDirectory
         let memosa = docs.appending(path: "Memosa Vault", directoryHint: .isDirectory)
-        return FileManager.default.fileExists(atPath: memosa.path) ? memosa : docs.appending(path: "Glyph Vault", directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: memosa.path) { return memosa }
+        return docs.appending(path: "Glyph Vault", directoryHint: .isDirectory)
     }
 
     /// `remember: false` (tests) leaves the saved choice alone: a test host shares the
@@ -195,7 +229,7 @@ final class AppModel {
         var shown: [Conversation]
         switch sidebar ?? .all {
         case .all, .recordings: shown = all
-        case .notes, .dictations: shown = []
+        case .notes, .dictations, .chat, .settings: shown = [] // these panes draw their own contents
         case .object(let id): shown = all.filter { $0.links.contains(id) }
         case .tag(let t): shown = all.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         }
@@ -206,7 +240,7 @@ final class AppModel {
     /// The notes filed under a Studio object or carrying a tag.
     func notes(for item: SidebarItem) -> [JotNote] {
         switch item {
-        case .object(let id): NoteStore.shared.notes.filter { $0.links.contains(id) }
+        case .object(let id): NoteStore.shared.notes.filter { $0.links.contains(id) || $0.domain.map { "domain/" + $0 } == id }
         case .tag(let t): NoteStore.shared.notes.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         default: []
         }
@@ -220,7 +254,7 @@ final class AppModel {
             for t in Set(c.tags) { tags[t, default: 0] += 1 }
         }
         for n in NoteStore.shared.notes {
-            for l in Set(n.links) { objects[l, default: 0] += 1 }
+            for l in Set(n.links + (n.domain.map { ["domain/" + $0] } ?? [])) { objects[l, default: 0] += 1 }
             for t in Set(n.tags) { tags[t, default: 0] += 1 }
         }
         return (objects, tags)
@@ -297,6 +331,16 @@ final class AppModel {
         NSPasteboard.general.setString(Markdown.export(meta, notes: vault.notes(id), transcript: vault.transcript(id), studio: studio), forType: .string)
     }
 
+    /// Just the words, every segment, `[mm:ss] Speaker: text`, with the speakers named if they have
+    /// been. Nothing else: no title, no summary, no action items. This is the one to reach for when
+    /// the transcript is going somewhere that is not Glyph Jot.
+    func copyTranscript(_ id: String) {
+        let text = vault.transcript(id).plainText
+        guard !text.isEmpty else { show("Nothing to copy yet: this recording has no transcript.", for: id); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     /// Opens a capture from All in its own section.
     func open(_ capture: Capture) {
         switch capture.kind {
@@ -350,17 +394,23 @@ final class AppModel {
     private func resolve(_ link: Link) async -> Link? {
         guard let kind = link.studioKind, !link.isObject else { return link }
         if let found = studio.match(link.name, kind) { return .object(found.id) }
-        guard let root = studioRoot, StudioCommand.url != nil else {
-            show("New \(kind.label.lowercased()) are made in Glyph Studio, which isn't on this Mac. Pick one it already has.")
+        guard let id = await createEntity(kind, link.name) else { return nil }
+        return .object(id)
+    }
+
+    /// A Glyph CRM entity for a name: the one that already answers to it, or a new page.
+    func createEntity(_ kind: StudioObject.Kind, _ name: String) async -> String? {
+        if let found = studio.match(name, kind) { return found.id }
+        guard let root = studioRoot else {
+            show("Jot saves people, places, products and things in your vault. Choose the vault in Settings, Storage.")
             return nil
         }
-        let name = link.name
-        guard let id = await Task.detached(operation: { StudioCommand.create(kind, name, vault: root) }).value else {
-            show("Glyph Studio couldn't add \(name). Try again, or add it in Glyph Studio.")
+        guard let id = await Task.detached(operation: { EntityPage.create(kind, name, in: root) }).value else {
+            show("Couldn't add \(name) to Glyph CRM. Check that the vault folder can be written.")
             return nil
         }
         await reloadStudio()
-        return .object(id)
+        return id
     }
 
     private func current(_ target: LinkTarget) -> ([String], [String]) {
@@ -477,6 +527,8 @@ final class AppModel {
     func stopRecording() async {
         guard let id = recordingID else { return }
         panel.hide()
+        // The live words stay on screen; the second pass replaces them when it lands.
+        live.stop()
         closeJot()
         Engine.shared.send(.init(.recording, on: false))
         let jots = self.jots
@@ -510,12 +562,15 @@ final class AppModel {
     private(set) var jots: [Jot] = []
     /// A note to open on Notes (from a recording's transcript).
     var openNote: String?
+    /// New Note is open: a typed note, saved into the notes folder like Fn+Shift's.
+    var writingNote = false
     /// A jot is open now: the talk key is down during the recording.
     private(set) var jotting: Jot?
 
     private func recordingBegan() {
         jots = []
         jotting = nil
+        if let id = recordingID { live.start(for: id) }
         Engine.shared.send(.init(.recording, on: true))
     }
 
@@ -613,10 +668,19 @@ final class AppModel {
         let audio = vault.url(id).appending(path: meta.audio)
 
         if FileManager.default.fileExists(atPath: audio.path) {
+            // Who spoke when first (seconds for an hour), so the transcript is split by speaker.
+            // Without it the transcript still comes, just without speakers.
+            stages[id] = .findingSpeakers
+            let clock = ContinuousClock.now
+            var turns: [SpeakerTurn] = []
+            do { turns = try await Diarizer().turns(audio) } catch {
+                jotLog.error("speakers: \(error.localizedDescription, privacy: .public)")
+            }
+            jotLog.notice("speakers: \(Set(turns.map(\.speaker)).count) in \(turns.count) turns, \(ContinuousClock.now - clock, privacy: .public)")
             stages[id] = .transcribing(0)
             do {
                 let names = studio.objects(.person).flatMap { [$0.name] + $0.aliases }
-                let transcript = try await Transcriber().transcribe(audio, names: names) { event in
+                var transcript = try await Transcriber().transcribe(audio, names: names, turns: turns) { event in
                     Task { @MainActor in
                         guard self.stages[id] != nil else { return }
                         switch event {
@@ -627,7 +691,11 @@ final class AppModel {
                 }
                 // What you said while jotting went to another app or a note: never into the meeting.
                 let jots = (try? vault.conversation(id))?.jots ?? []
+                // Doing it again finds the same voices in the same order: keep the names given.
+                let ids = Set(transcript.segments.map(\.speaker))
+                transcript.speakers = vault.transcript(id).speakers.filter { ids.contains($0.key) }
                 try vault.writeTranscript(transcript.excluding(jots), for: id)
+                live.clear(id)   // the kept transcript is the better one: it knows who spoke
             } catch {
                 stages[id] = nil
                 let fix: Banner.Fix = (error as? TranscriptionError) == .serviceLost ? .relaunch : .retry(id)
@@ -638,6 +706,16 @@ final class AppModel {
             library.reload()
         }
         await summarizeAndLink(id)
+    }
+
+    /// Names a voice on a recording ("S2" is Ken Lee). A Studio person is linked to the
+    /// recording too; an empty name goes back to "Speaker 2".
+    func nameSpeaker(_ speaker: String, in id: String, to name: String, person: StudioObject? = nil) {
+        var transcript = vault.transcript(id)
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcript.speakers[speaker] = name.isEmpty ? nil : name
+        perform { try vault.writeTranscript(transcript, for: id) }
+        if let person { addLink(.object(person.id), to: .recording(id)) }
     }
 
     func summarizeAndLink(_ id: String) async {
@@ -681,6 +759,10 @@ final class AppModel {
     static func parent(_ id: String) -> String {
         id.split(separator: "/").dropLast().joined(separator: "/")
     }
+
+    /// Settings, in the window's content pane. `openSettingsPane` below is the Mac's own
+    /// System Settings, which is a different thing.
+    func showSettings() { sidebar = .settings }
 
     static func openSettingsPane(_ anchor: String) {
         let url = switch anchor {

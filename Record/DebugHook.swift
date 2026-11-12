@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Debug builds only: drive the app from a script without touching the screen, so it
 /// can be tested while nobody uses the Mac. Post the distributed notification
-/// `dev.fru.jot.mac.app.check` with a command as the object, like `side:object:person/sam-lee`,
+/// `dev.fru.jot.mac.app.check` with a command as the object, like `side:object:person/ken-lee`,
 /// `tab:transcript`, `size:900x600`, `look:dark`, `windows:/tmp/w.json`.
 @MainActor
 enum DebugHook {
@@ -43,6 +43,7 @@ enum DebugHook {
         case "tab": animate { model.tab = DetailTab(rawValue: arg) ?? .summary }
         case "sidebar": model.columns = arg == "hide" ? .detailOnly : .all
         case "list": animate { model.showList = arg != "hide" }
+        case "listwidth": if let w = Double(arg) { model.listWidth = w }
         case "size":
             let wh = arg.split(separator: "x").compactMap { Double($0) }
             guard wh.count == 2, let window else { return }
@@ -59,20 +60,44 @@ enum DebugHook {
             if let data = try? JSONSerialization.data(withJSONObject: list, options: [.prettyPrinted]) {
                 try? data.write(to: URL(filePath: arg))
             }
+        // "snap:<png path>" draws the library (or "snap:other:<path>", the first other window)
+        // into a picture from inside the app: no Screen Recording permission needed.
+        case "snap":
+            let kv = arg.split(separator: ":", maxSplits: 1).map(String.init)
+            let other = kv.first == "other" && kv.count == 2
+            let target = other ? NSApp.windows.first { $0.isVisible && $0 !== window && !($0 is NSPanel) && $0.frame.width > 300 } : window
+            // An app may picture its own windows; the call is gone from the SDK, so look it up.
+            typealias Grab = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+            if let target, let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage"),
+               let image = unsafeBitCast(sym, to: Grab.self)(.null, 1 << 3, UInt32(target.windowNumber), 1 << 0 | 1 << 3)?.takeRetainedValue() {
+                try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(filePath: other ? kv[1] : arg))
+            }
         case "library": JotWindow.open(activate: false)
         case "front":
             NSApp.activate()
             window?.makeKeyAndOrderFront(nil)
-        case "closesettings":
-            for w in NSApp.windows where w.isVisible && w !== window && !(w is NSPanel) && w.frame.width > 300 { w.close() }
-            window?.makeKeyAndOrderFront(nil)
+        case "closesettings": model.sidebar = .all
+        // "addfield:<text>" opens the + field on the open recording or note with that text typed.
+        case "addfield": model.addLinkRequest = (model.addLinkRequest.id + 1, arg)
+        // "notenew:<file>|place:River Walk" makes a CRM entity, as picking "New place" does, and links it.
+        case "notenew":
+            let kv = arg.split(separator: "|", maxSplits: 1).map(String.init)
+            let kn = kv.count == 2 ? kv[1].split(separator: ":", maxSplits: 1).map(String.init) : []
+            if kn.count == 2, let kind = StudioObject.Kind.entities.first(where: { $0.prefix == kn[0] }) {
+                Task { if let id = await model.createEntity(kind, kn[1]) { model.addLink(.object(id), to: .note(kv[0])) } }
+            }
+        // "notedomain:<file>|health" files a note to a domain ("notedomain:<file>|" takes it off).
+        case "notedomain":
+            let kv = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            if kv.count == 2 { try? NoteStore.shared.setDomain(kv[0], kv[1].isEmpty ? nil : kv[1]) }
+        // "thought:<text>" saves a note as Fn+Shift does (domain lead-in and all).
+        case "thought": _ = try? Thoughts.save(arg); NoteStore.shared.reload()
+        case "settingspane": UserDefaults.standard.set(arg, forKey: "settingsPane")
+        case "review": model.reviewingLinks = arg != "off"
+        case "reviewlink": model.reviewApply += 1
         case "quickopen": model.quickOpen = arg != "off"
         case "search": model.searchText = arg
-        case "settings":
-            if let menu = NSApp.mainMenu?.items.first?.submenu,
-               let item = menu.items.first(where: { $0.keyEquivalent == "," }), let action = item.action {
-                NSApp.sendAction(action, to: item.target, from: item)
-            }
+        case "settings": model.showSettings()
         case "record":
             Task { arg == "stop" ? await model.stopRecording() : await model.startRecording() }
         case "feed": model.debugFeed = arg.isEmpty ? nil : URL(filePath: arg)
@@ -96,6 +121,11 @@ enum DebugHook {
         case "ask": Task { await Ask.shared.run(arg, over: AllPane.askSources(model), show: false) }
         case "accept", "dismiss": if let id = model.selectedID, let l = link(arg) { model.answer(l, for: id, accept: verb == "accept") }
         case "process": if let id = model.selectedID { Task { await model.process(id) } }
+        case "speaker": // speaker:S2=Ken Lee (a Studio person's name links them)
+            let kv = arg.split(separator: "=", maxSplits: 1).map(String.init)
+            if let id = model.selectedID, kv.count == 2 {
+                model.nameSpeaker(kv[0], in: id, to: kv[1], person: model.studio.objects(.person).first { $0.name == kv[1] })
+            }
         case "import": model.importAudio([URL(filePath: arg)])
         case "banner": model.show(arg.isEmpty ? AIError.unavailable(.appleIntelligenceOff).localizedDescription : arg,
                                   fix: .settings("AppleIntelligence"), for: model.selectedID)

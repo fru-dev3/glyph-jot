@@ -1,40 +1,61 @@
 import Foundation
 
-// Glyph Studio's objects, read from its vault, so a capture is filed under the same names and
-// ids Studio uses. Read only: Studio (its `prevail` command) owns every write to these files.
+// The vault's objects (Glyph CRM's People, Places, Orgs and Things, plus Glyph Bot's
+// projects and domains), read from the files, so a capture is filed under the same ids the CRM
+// uses. No database: `data/entities/<kind>/<slug>/entity.md` is the truth.
 // The layout is in docs/vault-format.md, "Studio links".
 
 /// A Studio object a capture can link to.
 public struct StudioObject: Hashable, Sendable, Identifiable {
     public enum Kind: String, CaseIterable, Sendable {
-        case domain, person, product, project
+        case domain, person, org, project, place, thing
 
-        /// The id's prefix: `person/sam-lee`, `org/acme`, `mission/launch`, `domain/career`.
+        /// The id's prefix: `person/ken-lee`, `org/acme`, `mission/launch`, `domain/career`.
         public var prefix: String {
             switch self {
             case .person: "person"
-            case .product: "org"
+            case .org: "org"
             case .project: "mission"
             case .domain: "domain"
+            case .place: "place"
+            case .thing: "thing"
             }
         }
+
+        /// The folder under `data/entities/` (nil: not an entity page).
+        public var folder: String? {
+            switch self {
+            case .person: "people"
+            case .place: "places"
+            case .org: "orgs"
+            case .thing: "things"
+            case .project, .domain: nil
+            }
+        }
+
+        /// Glyph CRM's four kinds, the ones a capture can make.
+        public static let entities: [Kind] = [.person, .place, .org, .thing]
 
         /// Studio's names, plural and one.
         public var label: String {
             switch self {
             case .person: "People"
-            case .product: "Products"
+            case .org: "Orgs"
             case .project: "Projects"
             case .domain: "Domains"
+            case .place: "Places"
+            case .thing: "Things"
             }
         }
 
         public var singular: String {
             switch self {
             case .person: "Person"
-            case .product: "Product"
+            case .org: "Org"
             case .project: "Project"
             case .domain: "Domain"
+            case .place: "Place"
+            case .thing: "Thing"
             }
         }
 
@@ -75,26 +96,29 @@ public struct StudioDirectory: Sendable, Equatable {
     public init(root: URL) {
         let data = root.appending(path: "data")
         var out: [StudioObject] = []
-        for (dir, kind) in [("entities/people", StudioObject.Kind.person), ("entities/orgs", .product)] {
-            for (slug, page) in StudioDirectory.pages(data.appending(path: dir)) {
+        for kind in StudioObject.Kind.entities {
+            for (slug, page) in StudioDirectory.pages(data.appending(path: "entities/" + (kind.folder ?? ""))) {
                 let f = StudioDirectory.frontMatter(page)
-                out.append(StudioObject(id: "\(kind.prefix)/\(slug)", name: f["name"].map(StudioDirectory.unquote) ?? StudioDirectory.title(slug),
+                // The permanent id Glyph CRM writes (`id: person/john-smith`), kept through renames;
+                // else the folder's.
+                let fixed = f["id"].map(StudioDirectory.unquote).flatMap { StudioObject.Kind(id: $0) == kind && $0.contains("/") ? $0 : nil }
+                out.append(StudioObject(id: fixed ?? "\(kind.prefix)/\(slug)", name: f["name"].map(StudioDirectory.unquote) ?? StudioDirectory.title(slug),
                                         aliases: StudioDirectory.list(f["aliases"]), kind: kind))
             }
         }
-        // Products are one list over org pages and app records: an app whose id, title or
-        // company is an org's slug shows on that org; any other app is a product of its own.
+        // Orgs are one list over org pages and app records: an app whose id, title or
+        // company is an org's slug shows on that org; any other app is an org of its own.
         let apps = data.appending(path: "apps")
         for dir in StudioDirectory.folders(apps) {
             let m = (try? JSONSerialization.jsonObject(with: Data(contentsOf: apps.appending(path: dir).appending(path: "manifest.json")))) as? [String: Any] ?? [:]
             let title = [m["title"], m["name"]].compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? dir
             let keys = [m["company"] as? String, dir, title].compactMap { $0 }.map { "org/" + StudioDirectory.slug($0) }
-            if let i = out.firstIndex(where: { $0.kind == .product && keys.contains($0.id) }) {
+            if let i = out.firstIndex(where: { $0.kind == .org && keys.contains($0.id) }) {
                 if title.caseInsensitiveCompare(out[i].name) != .orderedSame, !out[i].aliases.contains(title) { out[i].aliases.append(title) }
                 continue
             }
             let id = "org/" + StudioDirectory.slug(title)
-            if id != "org/", !out.contains(where: { $0.id == id }) { out.append(StudioObject(id: id, name: title, kind: .product)) }
+            if id != "org/", !out.contains(where: { $0.id == id }) { out.append(StudioObject(id: id, name: title, kind: .org)) }
         }
         let missions = data.appending(path: "missions")
         for slug in StudioDirectory.folders(missions) {
@@ -130,9 +154,18 @@ public struct StudioDirectory: Sendable, Equatable {
     }
 
     /// People whose name or alias `text` says as whole words.
-    public func peopleMentioned(in text: String) -> [StudioObject] {
+    public func peopleMentioned(in text: String) -> [StudioObject] { mentioned(in: text, kinds: [.person]) }
+
+    /// Objects of these kinds whose name or alias (three letters or more) `text` says as whole words.
+    public func mentioned(in text: String, kinds: [StudioObject.Kind]) -> [StudioObject] {
         let hay = text.lowercased()
-        return objects(.person).filter { ([$0.name] + $0.aliases).contains { mentions(hay, $0.lowercased()) } }
+        return objects.filter { o in kinds.contains(o.kind) && ([o.name] + o.aliases).contains { $0.count >= 3 && mentions(hay, $0.lowercased()) } }
+    }
+
+    /// Every other object of the same kind that answers to one of this one's names: two Johns.
+    public func namesakes(_ o: StudioObject) -> [StudioObject] {
+        let names = Set(([o.name] + o.aliases).map { $0.lowercased() })
+        return objects(o.kind).filter { $0.id != o.id && ([$0.name] + $0.aliases).contains { names.contains($0.lowercased()) } }
     }
 
     // MARK: reading
@@ -231,7 +264,7 @@ extension Vault {
     }
 
     /// Works out the guesses for a conversation against Studio and saves them: Studio people
-    /// the call names, products the model heard that Studio has and the call says, people
+    /// the call names, orgs the model heard that Studio has and the call says, people
     /// the model heard that Studio has no page for, up to three topics. Nothing linked or
     /// dismissed comes back.
     @discardableResult
@@ -251,13 +284,13 @@ extension Vault {
             if !meta.links.contains(o.id), !s.dismissed.contains(o.id), !s.links.contains(o.id) { s.links.append(o.id) }
         }
         for p in studio.peopleMentioned(in: hay) { add(p) }
-        for c in heard.companies where said(c) { if let o = studio.match(c, .product) { add(o) } }
+        for c in heard.companies where said(c) { if let o = studio.match(c, .org) { add(o) } }
         let named = (meta.links + s.links).compactMap { studio.object($0)?.name }
         for p in heard.people where said(p) {
             let name = Entity.cleanName(p)
             if let o = studio.match(name, .person) { add(o); continue }
             let taken = (s.people + s.dismissed + named).contains { $0.caseInsensitiveCompare(name) == .orderedSame }
-            // "Sam" is not someone new next to a linked or suggested "Sam Lee".
+            // "Ken" is not someone new next to a linked or suggested "Ken Lee".
             if !name.isEmpty, !taken, !(named + s.people).contains(where: { Entity.isShortForm(name, of: $0) }) { s.people.append(name) }
         }
         for t in tidyTags(heard.topics).prefix(3) where !meta.tags.contains(t) && !s.dismissed.contains(t) && !s.tags.contains(t) {
@@ -309,7 +342,7 @@ extension Vault {
             let key = kind.rawValue + "|" + name.lowercased()
             if let id = ids[key] { return id }
             if failed.contains(key) { return nil }
-            let skind: StudioObject.Kind = kind == .person ? .person : .product
+            let skind: StudioObject.Kind = kind == .person ? .person : .org
             let note = notes.first { $0.kind == kind && $0.name.caseInsensitiveCompare(name) == .orderedSame }
             var id = ([name] + (note?.aliases ?? [])).lazy.compactMap { studio.match($0, skind)?.id }.first
             var created = false

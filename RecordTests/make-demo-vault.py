@@ -3,7 +3,7 @@
 
     python3 RecordTests/make-demo-vault.py <empty folder> [--audio]
 
-Every name here is invented. Calls are filed under Glyph Studio ids (make-demo-notes.py
+Every name here is invented. Calls are filed under Glyph Bot ids (make-demo-notes.py
 writes the Studio vault they point at). Lee Chen is not in Studio and stays in the older
 format (a name on the call, a People note), with the older People and Accounts notes, so
 the app's move onto Studio runs on every demo. --audio speaks each transcript with `say`
@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 WPS = 3.0  # words a second, matching `say -r 180`
 
 PEOPLE = {
-    "Sam Lee": ("Acme", ["Sammy"], "Runs procurement at Acme. Prefers a call to email, mornings."),
+    "Ken Lee": ("Acme", ["Kenny"], "Runs procurement at Acme. Prefers a call to email, mornings."),
     "Kim Park": ("Globex", [], "Head of design at Globex. Wants the roadmap a quarter ahead."),
     "Pat Doe": ("Northwind", ["Patricia"], ""),
     "Lee Chen": (None, [], "Contractor for the kitchen."),
@@ -28,18 +28,18 @@ ACCOUNTS = {
 
 # folder, title, days ago, hour, people, accounts, tags, suggested, transcript, summary, decisions, actions
 CONVS = [
-    ("Work/Acme", "Acme renewal kickoff", 0, 9, ["Sam Lee"], ["Acme"], ["renewal", "pricing"],
+    ("Work/Acme", "Acme renewal kickoff", 0, 9, ["Ken Lee"], ["Acme"], ["renewal", "pricing"],
      {"people": ["Kim Park"], "tags": ["q4-planning"]},
-     [("Sam Lee", "Thanks for making time this early. I want to get the renewal moving before the budget freeze."),
+     [("Ken Lee", "Thanks for making time this early. I want to get the renewal moving before the budget freeze."),
       ("Me", "Of course. We can hold this year's price if you sign before the end of the month."),
-      ("Sam Lee", "That helps a lot. Finance will ask about the seat count though, we grew by about forty people."),
+      ("Ken Lee", "That helps a lot. Finance will ask about the seat count though, we grew by about forty people."),
       ("Me", "Then let's price the extra seats at the current rate and lock it for two years."),
-      ("Sam Lee", "I like that. Can you send the order form today so I can start the approval?"),
+      ("Ken Lee", "I like that. Can you send the order form today so I can start the approval?"),
       ("Me", "Yes, I'll send it this afternoon, and I'll copy Kim from Globex on the integration question."),
-      ("Sam Lee", "Perfect. Let's check in on Thursday.")],
-     "Sam wants the Acme renewal signed before the budget freeze. We offered to hold this year's price if they sign by the end of the month, and to price the forty new seats at the current rate, locked for two years.",
+      ("Ken Lee", "Perfect. Let's check in on Thursday.")],
+     "Ken wants the Acme renewal signed before the budget freeze. We offered to hold this year's price if they sign by the end of the month, and to price the forty new seats at the current rate, locked for two years.",
      ["Hold this year's price for a signature by October 31", "Price the new seats at the current rate for two years"],
-     [("Send Sam the order form", False, "Me", "2026-10-25"), ("Check in with Sam on Thursday", False, None, "2026-10-29"),
+     [("Send Ken the order form", False, "Me", "2026-10-25"), ("Check in with Ken on Thursday", False, None, "2026-10-29"),
       ("Ask finance about a two year lock", True, "Me", None)]),
     ("Work/Globex", "Globex design review", 0, 14, ["Kim Park"], ["Globex"], ["design", "roadmap"], {},
      [("Kim Park", "The new onboarding screens tested well, people found the record button in under five seconds."),
@@ -56,13 +56,13 @@ CONVS = [
       ("Me", "Everything stays on the Mac, I can send the one page summary.")],
      "Northwind's pilot team uses it daily for customer calls. Security's only question is where recordings live; they stay on the Mac, and we will send the one page summary.",
      [], [("Send Pat the security one pager", False, "Me", "2026-10-27")]),
-    ("Work", "Weekly team sync", 2, 10, ["Sam Lee", "Kim Park", "Pat Doe"], [], ["team"], {},
+    ("Work", "Weekly team sync", 2, 10, ["Ken Lee", "Kim Park", "Pat Doe"], [], ["team"], {},
      [("Kim Park", "Design is on track for the beta."), ("Pat Doe", "Northwind wants to expand the pilot."),
-      ("Sam Lee", "Acme renewal is moving, order form goes out this week.")],
+      ("Ken Lee", "Acme renewal is moving, order form goes out this week.")],
      "Design is on track for the beta, Northwind wants a bigger pilot and the Acme renewal is moving.", [],
      [("Plan the Northwind expansion", False, "Pat Doe", None), ("Book the beta retro", True, None, None)]),
-    ("Work/Acme", "Acme pricing follow-up", 4, 16, ["Sam Lee"], ["Acme"], ["pricing"], {},
-     [("Sam Lee", "Finance came back. They are fine with the price but want quarterly billing."),
+    ("Work/Acme", "Acme pricing follow-up", 4, 16, ["Ken Lee"], ["Acme"], ["pricing"], {},
+     [("Ken Lee", "Finance came back. They are fine with the price but want quarterly billing."),
       ("Me", "Quarterly works. I'll update the order form.")],
      "Acme finance accepted the price and asked for quarterly billing, which works.", ["Bill Acme quarterly"],
      [("Update the order form to quarterly billing", True, "Me", None)]),
@@ -79,9 +79,9 @@ CONVS = [
     ("Work/Northwind", "Northwind security review", 9, 9, ["Pat Doe"], ["Northwind"], ["security-review"], {},
      [("Pat Doe", "Security signed off. They liked that nothing leaves the device.")],
      "Northwind security signed off; nothing leaving the device was the deciding point.", [], []),
-    ("Work/Acme", "Acme quarterly business review", 13, 10, ["Sam Lee"], ["Acme"], ["qbr"], {},
-     [("Sam Lee", "Usage is up thirty percent this quarter, mostly from the sales team.")],
-     "Acme usage grew thirty percent this quarter, mostly in sales.", [], [("Share the usage report with Sam", True, None, None)]),
+    ("Work/Acme", "Acme quarterly business review", 13, 10, ["Ken Lee"], ["Acme"], ["qbr"], {},
+     [("Ken Lee", "Usage is up thirty percent this quarter, mostly from the sales team.")],
+     "Acme usage grew thirty percent this quarter, mostly in sales.", [], [("Share the usage report with Ken", True, None, None)]),
     ("Home", "Call with the contractor", 1, 18, ["Lee Chen"], [], ["kitchen", "budget"], {},
      [("Lee Chen", "The cabinets arrive on the third, we can start demolition the week before."),
       ("Me", "What about the deposit?"), ("Lee Chen", "Half now and half when the counters are in.")],
@@ -100,8 +100,8 @@ CONVS = [
      [("", "Idea: the recorder panel could show who is speaking, not just the level."),
       ("", "Also, tags during the call should autocomplete from people I already know.")],
      "", [], []),
-    ("Recordings", "Recording Oct 22", 3, 12, [], [], [], {"people": ["Sam Lee"], "accounts": ["Acme"]},
-     [("", "Quick note after talking to Sam about the Acme renewal and the new seats.")],
+    ("Recordings", "Recording Oct 22", 3, 12, [], [], [], {"people": ["Ken Lee"], "accounts": ["Acme"]},
+     [("", "Quick note after talking to Ken about the Acme renewal and the new seats.")],
      "", [], []),
     ("Recordings", "Podcast notes", 7, 8, [], [], ["ideas"], {},
      [("", "The best interfaces disappear. You notice the work, not the tool.")],
@@ -110,7 +110,7 @@ CONVS = [
 
 
 # Names Studio has (make-demo-notes.py), and where each folder's calls belong.
-STUDIO = {"Sam Lee": "person/sam-lee", "Kim Park": "person/kim-park", "Pat Doe": "person/pat-doe",
+STUDIO = {"Ken Lee": "person/ken-lee", "Kim Park": "person/kim-park", "Pat Doe": "person/pat-doe",
           "Acme": "org/acme", "Globex": "org/globex", "Northwind": "org/northwind"}
 DOMAIN = {"Work": "domain/career", "Home": "domain/home"}
 PROJECT = {"Acme renewal kickoff": "mission/acme-renewal", "Acme pricing follow-up": "mission/acme-renewal",

@@ -47,15 +47,22 @@ final class Ask {
     /// The dictations sharing the most of the question's words, newest first among equals.
     /// Questions and earlier answers aren't sources.
     static func find(_ question: String, in entries: [HistoryView.Entry], limit: Int = 10) -> [HistoryView.Entry] {
+        rank(question, entries.filter { $0.mode != "ask" }, limit: limit, text: \.text, when: \.at)
+    }
+
+    /// Whatever shares the most of the question's words, best first and newest among equals. The
+    /// one scorer, so Chat and the talk key's Ask agree on what a question is about.
+    static func rank<T>(_ question: String, _ items: [T], limit: Int = 10,
+                        text: (T) -> String, when: (T) -> Date) -> [T] {
         let keys = Set(Rules.words(question).filter { $0.count >= 3 && !little.contains($0) })
         guard !keys.isEmpty else { return [] }
-        var scored: [(entry: HistoryView.Entry, score: Int)] = []
-        for entry in entries where entry.mode != "ask" {
-            let text = entry.text.lowercased()
-            let score = keys.filter { text.contains($0) }.count
-            if score > 0 { scored.append((entry, score)) }
+        var scored: [(item: T, score: Int)] = []
+        for item in items {
+            let words = text(item).lowercased()
+            let score = keys.filter { words.contains($0) }.count
+            if score > 0 { scored.append((item, score)) }
         }
-        scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.entry.at > $1.entry.at }
-        return scored.prefix(limit).map(\.entry)
+        scored.sort { $0.score != $1.score ? $0.score > $1.score : when($0.item) > when($1.item) }
+        return scored.prefix(limit).map(\.item)
     }
 }

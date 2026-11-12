@@ -1,7 +1,8 @@
 import GlyphCore
 import SwiftUI
 
-struct SettingsView: View {
+/// Recording: what a recording hears, and what this Mac needs for transcripts and summaries.
+struct RecordingPane: View {
     @Environment(AppModel.self) private var model
     @State private var speech: Transcriber.Status?
     @State private var ai = OnDeviceModel.status
@@ -11,26 +12,7 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            Section("Vault") {
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        Button("Choose\u{2026}", action: chooseVault)
-                        Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([model.vault.root])
-                        } label: { Image(systemName: "folder") }
-                        .help("Reveal in Finder")
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.vault.root.lastPathComponent).font(.system(size: 13, weight: .semibold))
-                        Text(model.vault.root.deletingLastPathComponent().path(percentEncoded: false).replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-            }
+            Section("Recordings folder") { RecordingsFolderRow() }
 
             Section("Recording") {
                 Toggle("Record the Mac's sound too", isOn: $model.includeSystemAudio)
@@ -49,20 +31,8 @@ struct SettingsView: View {
                           fix: ai == .appleIntelligenceOff ? ("Open Settings", { AppModel.openSettingsPane("AppleIntelligence") }) : nil)
             }
 
-            Section("Shortcuts") {
-                ForEach(Self.shortcuts, id: \.0) { s in
-                    LabeledContent(s.1) {
-                        Text(s.0)
-                            .font(.system(size: 12, weight: .medium))
-                            .padding(.horizontal, 7)
-                            .frame(minHeight: 22)
-                            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
-                    }
-                }
-            }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 640)
         .task {
             speech = await Transcriber().status()
             ai = OnDeviceModel.status
@@ -122,19 +92,28 @@ struct SettingsView: View {
         ("\u{2303}\u{2318}L", "Show or hide the list"),
         ("\u{2318}\u{21A9}", "Rename"),
         ("\u{21E7}\u{2318}C", "Copy as Markdown"),
+        ("\u{2325}\u{2318}C", "Copy the transcript on its own"),
         ("\u{21E7}\u{2318}R", "Reveal in Finder"),
         ("\u{2318}\u{232B}", "Move to Trash"),
     ]
+}
 
-    private func chooseVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.directoryURL = model.vault.root
-        panel.prompt = "Use This Folder"
-        panel.message = "Choose the folder that holds your conversations"
-        if panel.runModal() == .OK, let url = panel.url { model.switchVault(to: url) }
+/// Where recordings are kept (their own folder: audio, transcript, notes.md), shown and changed.
+struct RecordingsFolderRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        FolderRow(title: "Recordings", url: model.vault.root,
+                  detail: "Audio, transcript and notes.md for each recording; notes.md carries its tags and entities") {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.directoryURL = model.vault.root
+            panel.prompt = "Use This Folder"
+            panel.message = "Choose the folder that holds your recordings"
+            if panel.runModal() == .OK, let url = panel.url { model.switchVault(to: url) }
+        }
     }
 }
 

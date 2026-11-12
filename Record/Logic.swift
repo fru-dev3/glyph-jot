@@ -11,6 +11,10 @@ struct Candidate: Hashable {
     var isNew = false
     /// Captures it already has.
     var count = 0
+    /// A new Glyph CRM entity of this kind, called `link.name` (made when picked).
+    var newKind: StudioObject.Kind?
+    /// What tells two of the same name apart ("Which John?"): the kind and the page's slug.
+    var detail: String?
 }
 
 enum LinkMatcher {
@@ -38,10 +42,17 @@ enum LinkMatcher {
         if !isTag {
             for o in studio.objects {
                 guard let s = score([o.name] + o.aliases) else { continue }
-                found.append((s, Candidate(link: .object(o.id), count: counts.objects[o.id] ?? 0)))
+                let twins = studio.namesakes(o)
+                found.append((s, Candidate(link: .object(o.id), count: counts.objects[o.id] ?? 0,
+                                           detail: twins.isEmpty ? nil : "\(o.kind.singular), \(o.id.split(separator: "/").last ?? "")")))
             }
         }
-        for (tag, n) in counts.tags {
+        // Asked for a tag ("#..."), Fru's canonical ones are offered even before a capture
+        // carries them. Without the "#" the list stays as it was, so a Studio object of the
+        // same name still wins.
+        var pool = counts.tags
+        if isTag { for slug in CanonicalTags.all.map(\.slug) where pool[slug] == nil { pool[slug] = 0 } }
+        for (tag, n) in pool {
             guard let s = score([tag]) else { continue }
             found.append((s, Candidate(link: .tag(tag), count: n)))
         }
@@ -59,12 +70,16 @@ enum LinkMatcher {
             if isTag {
                 out.append(Candidate(link: .tag(tidyTag(query)), isNew: true))
             } else {
-                out.append(Candidate(link: .person(Entity.cleanName(query)), isNew: true))
-                out.append(Candidate(link: .account(Entity.cleanName(query)), isNew: true))
+                // New in Glyph CRM: a person, place, product or thing; or a tag.
+                for kind in StudioObject.Kind.entities {
+                    out.append(Candidate(link: .person(Entity.cleanName(query)), isNew: true, newKind: kind))
+                }
                 out.append(Candidate(link: .tag(tidyTag(query)), isNew: true))
             }
         }
-        return Array(out.prefix(8))
+        // Room for every "New ..." row after the matches.
+        let made = out.filter(\.isNew), matches = out.filter { !$0.isNew }
+        return Array(matches.prefix(8 - made.count)) + made
     }
 
     /// How the vault stores a tag: lower case, words joined with `-`, no `#`.
@@ -95,7 +110,12 @@ enum Markdown {
                 return line + "\n"
             }.joined()
         }
-        if notes.summary.isEmpty, notes.actions.isEmpty, !transcript.segments.isEmpty {
+        // Always, when there is one. This used to be `summary.isEmpty && actions.isEmpty`, so the
+        // moment a recording had been summarized its transcript vanished from the copy: a 33
+        // minute conversation came out as a few lines of summary (Fru, 2026-11-03: "when i copy
+        // the raw transcript, its not complete"). The summary is the part you can regenerate; the
+        // words are not.
+        if !transcript.segments.isEmpty {
             out += "\n## Transcript\n\n" + transcript.plainText
         }
         return out

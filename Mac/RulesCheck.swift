@@ -4,7 +4,7 @@ func check(_ got: String, _ want: String, _ line: Int = #line) {
     if got != want { fputs("line \(line): got \(got.debugDescription), want \(want.debugDescription)\n", stderr); fatalError() }
 }
 // Spoken breaks.
-check(Rules.spokenBreaks("Dear Sam, new paragraph, thanks for the call. New line. Lee"), "Dear Sam\n\nThanks for the call.\nLee")
+check(Rules.spokenBreaks("Dear Ken, new paragraph, thanks for the call. New line. Lee"), "Dear Ken\n\nThanks for the call.\nLee")
 check(Rules.spokenBreaks("No breaks here."), "No breaks here.")
 // When the AI pass runs.
 assert(Rules.wantsAI("Send it Friday, no wait, Monday."))
@@ -41,8 +41,8 @@ assert(Rules.splitEnter("ship it and send it", code: true) == ("ship it", true))
 assert(!Rules.splitEnter("I will send it", code: false).enter)
 assert(!Rules.splitEnter("Press enter to continue, it says.", code: false).enter)
 // Forms.
-check(Rules.formRequest("Fill the form, name Sam Lee, city Austin.") ?? "", "name Sam Lee, city Austin.")
-check(Rules.formRequest("Please fill out this form: email sam at example dot com") ?? "", "email sam at example dot com")
+check(Rules.formRequest("Fill the form, name Ken Lee, city Austin.") ?? "", "name Ken Lee, city Austin.")
+check(Rules.formRequest("Please fill out this form: email ken at example dot com") ?? "", "email ken at example dot com")
 assert(Rules.formRequest("The form looks fine.") == nil)
 // Learning names.
 check(Rules.fuzzyNames("I pushed it to Zentro and Quilo.", names: ["Zentra", "Quillo"]), "I pushed it to Zentra and Quillo.")
@@ -64,8 +64,8 @@ check(Rules.project(title: "acme-api" + em + "Rules.swift", bundle: "com.apple.d
 check(Rules.project(title: "x", document: "file:///srv/code/Acme.xcodeproj/", bundle: "com.apple.dt.Xcode", app: "Xcode") ?? "-", "Acme")
 check(Rules.project(title: "acme-api" + em + "-zsh" + em + "80\u{D7}24", bundle: "com.apple.Terminal", app: "Terminal") ?? "-", "acme-api")
 check(Rules.project(title: "-zsh", document: "file:///srv/code/acme%20api/", bundle: "com.apple.Terminal", app: "Terminal") ?? "-", "acme api")
-assert(Rules.project(title: "sam" + em + "-zsh" + em + "80\u{D7}24", bundle: "com.apple.Terminal", app: "Terminal", user: "sam") == nil)
-check(Rules.project(title: "sam@laptop:~/code/acme-api", bundle: "com.googlecode.iterm2", app: "iTerm2") ?? "-", "acme-api")
+assert(Rules.project(title: "ken" + em + "-zsh" + em + "80\u{D7}24", bundle: "com.apple.Terminal", app: "Terminal", user: "ken") == nil)
+check(Rules.project(title: "ken@laptop:~/code/acme-api", bundle: "com.googlecode.iterm2", app: "iTerm2") ?? "-", "acme-api")
 check(Rules.project(title: "~/code/northwind/", bundle: "com.mitchellh.ghostty", app: "Ghostty") ?? "-", "northwind")
 assert(Rules.project(title: "~", bundle: "com.mitchellh.ghostty", app: "Ghostty") == nil)
 assert(Rules.project(title: "claude", bundle: "com.mitchellh.ghostty", app: "Ghostty") == nil)

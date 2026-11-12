@@ -28,11 +28,6 @@ struct GlyphJotApp: App {
         .windowToolbarStyle(.unified)
         .commands { RecordCommands(model: model) }
 
-        Settings {
-            JotSettings()
-                .environment(model)
-        }
-
         MenuBarExtra {
             MenuBarContent()
                 .environment(model)
@@ -49,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             Recorder.migrateSettings()
+            FoldBack.run() // anything written while the notes folder was away comes home
             let model = AppModel.shared
             Engine.shared.onMessage = { model.engineSaid($0) }
             // The library opens with the app, unless it was started at login (then it waits in the menu bar).

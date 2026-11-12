@@ -4,7 +4,8 @@
 // what it uses:
 //   GlyphVault    the plain-file vault (docs/vault-format.md): read, write, links,
 //                 suggestions, search, tasks, a Library that follows the disk
-//   GlyphCapture  recording (mic + system audio to .m4a) and on-device transcription
+//   GlyphCapture  recording (mic + system audio to .m4a), on-device transcription, who spoke
+//                 when (FluidAudio, Apache-2.0; its NemoTextProcessing binary trait is off)
 //   GlyphAI       summaries and heard names with Apple's on-device model
 // GlyphCore re-exports all three. Version: VERSION; changes: CHANGELOG.md.
 import PackageDescription
@@ -19,14 +20,17 @@ let package = Package(
         .library(name: "GlyphCore", targets: ["GlyphCore"]),
         .executable(name: "glyphcore-report", targets: ["glyphcore-report"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7", traits: []),
+    ],
     targets: [
         .target(name: "GlyphVault"),
-        .target(name: "GlyphCapture", dependencies: ["GlyphVault"]),
+        .target(name: "GlyphCapture", dependencies: ["GlyphVault", "GlyphAI", .product(name: "FluidAudio", package: "FluidAudio")]),
         .target(name: "GlyphAI", dependencies: ["GlyphVault"]),
         .target(name: "GlyphCore", dependencies: ["GlyphVault", "GlyphCapture", "GlyphAI"]),
-        .executableTarget(name: "glyphcore-report", dependencies: ["GlyphVault"]),
+        .executableTarget(name: "glyphcore-report", dependencies: ["GlyphVault", "GlyphAI"]),
         .testTarget(name: "GlyphVaultTests", dependencies: ["GlyphVault"], resources: [.copy("Fixtures"), .copy("Golden")]),
-        .testTarget(name: "GlyphCaptureTests", dependencies: ["GlyphCapture"]),
-        .testTarget(name: "GlyphAITests", dependencies: ["GlyphAI"]),
+        .testTarget(name: "GlyphCaptureTests", dependencies: ["GlyphCapture", "GlyphAI", "GlyphVault"]),
+        .testTarget(name: "GlyphAITests", dependencies: ["GlyphAI", "GlyphVault"]),
     ]
 )

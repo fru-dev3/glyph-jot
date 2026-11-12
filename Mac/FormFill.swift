@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// Fill a whole form by voice: "fill the form, name Sam Lee, city Austin, email sam at
+/// Fill a whole form by voice: "fill the form, name Ken Lee, city Austin, email ken at
 /// example dot com". Jot reads the form's fields through Accessibility (the field you're in
 /// and every text field around it on the page), the on-device model matches what you said
 /// to them, and Jot types each value into its field. Password fields are never touched.
@@ -44,8 +44,8 @@ enum FormFill {
         return filled
     }
 
-    /// Emails are lowercase ("Sam@example.com" from speech), and shouting is undone ("SAM LEE"
-    /// becomes "Sam Lee").
+    /// Emails are lowercase ("Ken@example.com" from speech), and shouting is undone ("KEN LEE"
+    /// becomes "Ken Lee").
     static func normalCase(_ value: String) -> String {
         if value.contains("@"), !value.contains(" ") { return value.lowercased() }
         guard value.contains(where: \.isLetter), value == value.uppercased() else { return value }

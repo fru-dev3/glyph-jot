@@ -8,18 +8,24 @@ struct LibraryWindow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dropping = false
+    @FocusState private var searchFocus: Bool
 
     var body: some View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $model.columns) {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300) // 232: the canvas's rail
         } detail: {
             Group {
+            if !model.isVaultPresent && model.sidebar != .settings {
+                NoVault()
+            } else {
             switch model.sidebar {
             case .all: AllPane()
+            case .chat: ChatPane()
             case .notes: NotesPane()
             case .dictations: DictationsPane()
+            case .settings: JotSettings()
             default:
             GeometryReader { geo in
             HStack(spacing: 0) {
@@ -37,13 +43,15 @@ struct LibraryWindow: View {
             }
             }
             }
+            }
             .overlay(alignment: .top) { appBanners }
         }
         .navigationTitle("Glyph Jot") // the window's name in the Window menu and Mission Control
         .toolbar(removing: .title)
         .toolbar {
-            // One control per corner: with the sidebar hidden its toggle owns the corner.
-            if model.columns != .detailOnly {
+            // One control per corner: with the sidebar hidden its toggle owns the corner, and
+            // Settings has no list to show, so nothing stands there offering to show one.
+            if model.columns != .detailOnly, model.sidebar != .settings, model.sidebar != .chat {
             ToolbarItem(placement: .navigation) {
                 Button {
                     withAnimation(.glyph(reduceMotion)) { model.showList.toggle() }
@@ -53,16 +61,19 @@ struct LibraryWindow: View {
                 }
                 .help(model.showList ? "Hide the list (Control-Command-L)" : "Show the list (Control-Command-L)")
             }
-            }
-            ToolbarItem(placement: .principal) {
-                SearchField(text: $model.searchText, focus: $model.searchFocused)
-                    .frame(minWidth: 180, idealWidth: 300, maxWidth: 340)
-            }
-            ToolbarSpacer(.flexible)
-            ToolbarItem(placement: .primaryAction) {
-                RecordButton()
+            } else {
+            // Record lives at the foot of the sidebar; with the sidebar hidden it comes up here.
+            ToolbarItem(placement: .primaryAction) { ToolbarRecordButton() }
             }
         }
+        // The system's search: it sits at the toolbar's trailing edge, clear of the columns,
+        // and folds into a magnifier when the window is narrow, so nothing ever overlaps.
+        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search")
+        .searchFocused($searchFocus)
+        .onChange(of: model.searchFocused) {
+            if model.searchFocused { searchFocus = true; model.searchFocused = false }
+        }
+        .sheet(isPresented: $model.reviewingLinks) { LinkReviewSheet().environment(model) }
         .overlay {
             if model.quickOpen {
                 QuickOpen()
@@ -139,73 +150,34 @@ struct ResizeHandle: View {
     }
 }
 
-/// Record in the toolbar's corner: a green capsule; while recording, the time and Stop.
-struct RecordButton: View {
+
+
+/// The honest state when the vault is absent or removed.
+struct NoVault: View {
     @Environment(AppModel.self) private var model
 
+    func openSettings(_ target: AppModel) {
+        target.sidebar = .settings
+    }
+
     var body: some View {
-        if model.isRecording {
-            Button { model.toggleRecording() } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "stop.fill").font(.system(size: 10, weight: .bold))
-                    Text(Format.clock(model.recorder.elapsed))
-                        .font(.system(size: 13, weight: .semibold))
-                        .monospacedDigit()
-                }
-                .padding(.horizontal, 6)
+        VStack(spacing: 14) {
+            Image(systemName: "waveform.badge.exclamationmark")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(Color.accentColor)
+            Text("Choose your vault").font(.system(size: 26, weight: .bold))
+            Text("Glyph Jot needs your vault to store recordings, notes, and dictations.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button("Open Settings") {
+                openSettings(model)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.red)
-            .help("Stop recording (Command-R)")
-        } else {
-            Button { model.toggleRecording() } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(.white).frame(width: 8, height: 8)
-                    Text("Record").font(.system(size: 13, weight: .semibold))
-                }
-                .padding(.horizontal, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .help("Record a conversation (Command-R)")
-            .contextMenu {
-                Toggle("Record the Mac's Sound Too", isOn: Binding(get: { model.includeSystemAudio }, set: { model.includeSystemAudio = $0 }))
-            }
+            .controlSize(.large)
+            .accessibilityIdentifier("novault.settings")
         }
-    }
-}
-
-/// The toolbar's search: AppKit's own field, so it looks and behaves like the Mac's.
-struct SearchField: NSViewRepresentable {
-    @Binding var text: String
-    @Binding var focus: Bool
-
-    func makeNSView(context: Context) -> NSSearchField {
-        let f = NSSearchField()
-        f.placeholderString = "Search"
-        f.delegate = context.coordinator
-        f.sendsSearchStringImmediately = true
-        f.controlSize = .large
-        return f
-    }
-
-    func updateNSView(_ f: NSSearchField, context: Context) {
-        if f.stringValue != text { f.stringValue = text }
-        if focus {
-            DispatchQueue.main.async {
-                f.window?.makeFirstResponder(f)
-                focus = false
-            }
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-        func controlTextDidChange(_ note: Notification) {
-            guard let f = note.object as? NSSearchField else { return }
-            MainActor.assumeIsolated { text.wrappedValue = f.stringValue }
-        }
+        .padding(40)
+        .accessibilityIdentifier("novault")
     }
 }

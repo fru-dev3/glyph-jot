@@ -67,8 +67,9 @@ public struct Transcriber: Sendable {
     }
 
     /// Transcribes an audio file into segments with start and end seconds. `names`
-    /// (people, accounts and their aliases) help it spell them right.
-    public func transcribe(_ file: URL, names: [String] = [], progress: @escaping @Sendable (Event) -> Void = { _ in }) async throws -> Transcript {
+    /// (people, accounts and their aliases) help it spell them right. With `turns` (from
+    /// `Diarizer`), each segment is split where the speaker changes and carries its speaker.
+    public func transcribe(_ file: URL, names: [String] = [], turns: [SpeakerTurn] = [], progress: @escaping @Sendable (Event) -> Void = { _ in }) async throws -> Transcript {
         let transcriber = try await module()
         try await install(transcriber, progress)
         let audio: AVAudioFile
@@ -84,7 +85,8 @@ public struct Transcriber: Sendable {
                     let end = result.range.end.seconds
                     if duration > 0, end.isFinite { progress(.transcribing(min(1, end / duration))) }
                     guard !text.isEmpty else { continue }
-                    segments.append(Transcript.Segment(start: result.range.start.seconds, end: end, text: text))
+                    let segment = Transcript.Segment(start: result.range.start.seconds, end: end, text: text)
+                    segments += Transcript.split(segment, words: Self.words(result.text), turns: turns)
                 }
                 return segments
             }
@@ -115,7 +117,25 @@ public struct Transcriber: Sendable {
             return await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US"))
         }
         guard let found else { throw TranscriptionError.unsupportedLanguage }
-        return SpeechTranscriber(locale: found, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+        return SpeechTranscriber(locale: found, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
+    }
+
+    /// The words of a result with their times. A run with no time (punctuation) joins the word before.
+    static func words(_ text: AttributedString) -> [TimedWord] {
+        var out: [TimedWord] = []
+        for run in text.runs {
+            let piece = String(text[run.range].characters)
+            if let r = run.audioTimeRange, r.start.seconds.isFinite, r.end.seconds.isFinite {
+                out.append(TimedWord(text: piece, start: r.start.seconds, end: r.end.seconds))
+            } else if !out.isEmpty {
+                out[out.count - 1].text += piece
+            } else {
+                out.append(TimedWord(text: piece, start: 0, end: 0))
+            }
+        }
+        // A leading untimed run takes the first timed word's time.
+        if out.count > 1, out[0].end == 0 { out[1].text = out[0].text + out[1].text; out.removeFirst() }
+        return out
     }
 
     private func install(_ module: SpeechTranscriber, _ progress: @escaping @Sendable (Event) -> Void) async throws {

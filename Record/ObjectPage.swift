@@ -1,7 +1,7 @@
 import GlyphCore
 import SwiftUI
 
-/// A Glyph Studio object's page over what Glyph Jot filed under it: its name, Studio's word
+/// A Glyph Bot object's page over what Glyph Jot filed under it: its name, Studio's word
 /// for it, its aliases and how many recordings and notes. Read only: Studio edits it.
 struct ObjectPage: View {
     let id: String
@@ -21,7 +21,7 @@ struct ObjectPage: View {
                         .font(.system(size: 22, weight: .bold))
                         .lineLimit(1)
                         .textSelection(.enabled)
-                    Text(CountLine.text(kind.singular + (object == nil ? ", no longer in Glyph Studio" : ""), recordings: recordings, notes: notes))
+                    Text(CountLine.text(kind.singular + (object == nil ? ", no longer in Glyph CRM" : ""), recordings: recordings, notes: notes))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -86,10 +86,12 @@ struct TagPage: View {
     var body: some View {
         let recordings = model.listed.count
         let notes = model.notes(for: .tag(tag)).count
+        // A canonical tag wears its own colour, the same hue the iPhone draws.
+        let tint = CanonicalTags.color(tag) ?? Color.accentColor
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(Color.accentColor.opacity(0.14))
-                Image(systemName: "number").font(.system(size: 20, weight: .semibold)).foregroundStyle(.tint)
+                Circle().fill(tint.opacity(0.14))
+                Image(systemName: "number").font(.system(size: 20, weight: .semibold)).foregroundStyle(tint)
             }
             .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 2) {

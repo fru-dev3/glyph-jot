@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A made-up Glyph Studio vault with notes and dictations, for trying Glyph Jot and taking
+"""A made-up Glyph Bot vault with notes and dictations, for trying Glyph Jot and taking
 its screenshots.
 
     python3 RecordTests/make-demo-notes.py <studio vault folder> [<recordings vault>]
@@ -12,17 +12,20 @@ the newest recording as a jot said during it.
 import json, os, sys
 from datetime import datetime, timedelta, timezone
 
-PEOPLE = {"sam-lee": ("Sam Lee", ["Sammy"]), "kim-park": ("Kim Park", []), "pat-doe": ("Pat Doe", ["Patricia"])}
+PEOPLE = {"ken-lee": ("Ken Lee", ["Kenny"]), "kim-park": ("Kim Park", []), "pat-doe": ("Pat Doe", ["Patricia"]),
+          "lee-chen": ("Lee Chen", ["Lee"]), "lee-chen-2": ("Lee Chen", ["Lee"])}  # two Lees: "Which Lee?"
+PLACES = {"riverside-park": "Riverside Park", "corner-market": "Corner Market"}
+THINGS = {"kitchen-backsplash": "Kitchen backsplash"}
 ORGS = {"acme": ("Acme", ["Acme Corp"]), "globex": ("Globex", []), "northwind": ("Northwind", [])}
 APPS = {"acme-portal": {"id": "acme-portal", "name": "Acme Portal", "company": "Acme"}, "initech": {"id": "initech", "name": "Initech"}}
 MISSIONS = {"acme-renewal": "Acme renewal", "kitchen-remodel": "Kitchen remodel"}
 DOMAINS = {"career": "Career", "home": "Home", "health": "Health", "money": "Money", "learning": "Learning"}
 # Which notes are filed where (by NOTES index).
-NOTE_LINKS = {0: ["person/sam-lee", "org/acme", "domain/career"], 1: ["domain/learning"], 2: ["domain/home", "mission/kitchen-remodel"],
+NOTE_LINKS = {0: ["person/ken-lee", "org/acme", "domain/career"], 1: ["domain/learning"], 2: ["domain/home", "mission/kitchen-remodel"],
               4: ["domain/health"], 5: ["person/kim-park", "org/globex"]}
 
 NOTES = [
-    (0, 9, 41, "Mac", None, "Send Sam the order form today, and ask finance about the forty new seats before Friday."),
+    (0, 9, 41, "Mac", None, "Send Ken the order form today, and ask finance about the forty new seats before Friday."),
     (0, 8, 12, "iPhone", "Riverside Park", "The best onboarding is the one you never notice. Every extra screen is a question the product failed to answer."),
     (1, 18, 5, "iPhone", "Corner Market", "Buy tiles for the kitchen backsplash, the matte green ones Lee showed us."),
     (1, 11, 30, "Mac", None, "Idea: a weekly digest of open action items across every account, sent Monday at seven."),
@@ -31,7 +34,7 @@ NOTES = [
     (4, 21, 2, "iPhone", None, "Read chapter four tonight. The part about deliberate practice is worth a second pass."),
 ]
 DICTATIONS = [
-    (0, 10, 2, "Mail", None, "Hi Sam, attached is the order form with the forty additional seats at the current rate. Let me know if finance needs anything else."),
+    (0, 10, 2, "Mail", None, "Hi Ken, attached is the order form with the forty additional seats at the current rate. Let me know if finance needs anything else."),
     (0, 9, 15, "Terminal", "glyph-jot", "git commit -m \"Recorder panel: show when a jot is private\""),
     (0, 8, 50, "Slack", None, "on my way, five minutes out"),
     (1, 15, 40, "Safari", None, "best matte green ceramic tile for a kitchen backsplash"),
@@ -49,7 +52,10 @@ def main():
     vault, rec = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else None)
     data = os.path.join(vault, "data")
     for slug, (name, aliases) in PEOPLE.items():
-        put(os.path.join(data, "entities/people", slug, "entity.md"), f"---\nname: {name}\nkind: person\naliases: [{', '.join(aliases)}]\nsaved: true\n---\n")
+        put(os.path.join(data, "entities/people", slug, "entity.md"), f"---\nname: {name}\nkind: person\naliases: [{', '.join(aliases)}]\nsaved: true\nid: person/{slug}\n---\n")
+    for kind, folder, items in (("place", "places", PLACES), ("thing", "things", THINGS)):
+        for slug, name in items.items():
+            put(os.path.join(data, "entities", folder, slug, "entity.md"), f"---\nname: {name}\nkind: {kind}\naliases: []\nsaved: true\nid: {kind}/{slug}\n---\n")
     for slug, (name, aliases) in ORGS.items():
         put(os.path.join(data, "entities/orgs", slug, "entity.md"), f"---\nname: {name}\nkind: org\naliases: [{', '.join(aliases)}]\nsaved: true\n---\n")
     for slug, m in APPS.items():
@@ -66,7 +72,7 @@ def main():
         t = (now - timedelta(days=days)).replace(hour=h, minute=m)
         stem = t.strftime("%Y-%m-%d %H-%M-%S")
         fm = f"---\ndate: {t.strftime('%Y-%m-%dT%H:%M:%S')}\ntags: []\nkind: voice\ndevice: {device}\n"
-        if len(files) in NOTE_LINKS: fm += f"links: [{', '.join(NOTE_LINKS[len(files)])}]\n"
+        if len(files) in NOTE_LINKS: fm += f"entities: [{', '.join(NOTE_LINKS[len(files)])}]\n"
         if place: fm += f'place: "{place}"\n'
         fm += "source: jot\n---\n\n"
         open(os.path.join(notes, stem + ".md"), "w").write(fm + text + "\n")

@@ -15,11 +15,9 @@ enum JotPermissions {
     }
 }
 
-struct GeneralTab: View {
+/// Dictation: the talk key and what it does, and how the words are written.
+struct DictationPane: View {
     @Bindable private var prefs = Prefs.shared
-    @State private var atLogin = SMAppService.mainApp.status == .enabled
-    // Re-read when the window comes back, after a trip to System Settings.
-    @State private var refresh = 0
 
     var body: some View {
         Form {
@@ -56,56 +54,28 @@ struct GeneralTab: View {
                 Text("Starts at once and never misses your first word. The mic stays on between dictations (the orange dot), holding under a second of sound in memory, never saved. Off: the mic turns on when you press the key.")
                     .font(.callout).foregroundStyle(.secondary)
                 Toggle("Sounds", isOn: $prefs.sounds)
-                Toggle("Open at login", isOn: $atLogin)
-                    .onChange(of: atLogin) {
-                        try? atLogin ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
-                    }
-            }
-            Section("Permissions") {
-                Grant(name: "Input Monitoring", why: "to hear the talk key", ok: JotPermissions.keys, pane: "Privacy_ListenEvent")
-                Grant(name: "Accessibility", why: "to paste where you are", ok: JotPermissions.paste, pane: "Privacy_Accessibility")
-                Grant(name: "Microphone", why: "to hear you", ok: JotPermissions.mic, pane: "Privacy_Microphone")
-            }
-            .id(refresh)
-            Section("Where your words go") {
-                LabeledContent {
-                    HStack {
-                        Text(DictationLog.chosen?.path(percentEncoded: false) ?? "None").foregroundStyle(.secondary).lineLimit(1)
-                        Button("Choose…") { chooseVault() }
-                    }
-                } label: {
-                    Text("Notes folder")
-                    Text("Optional. Any folder, an Obsidian vault too: thoughts are saved in it as Markdown notes, and Glyph Jot keeps its own files in a hidden .jot folder there, so they sync with it.")
-                }
-                LabeledContent("Every dictation", value: DictationLog.folder.path(percentEncoded: false))
-                LabeledContent("Thoughts", value: Thoughts.folder.path(percentEncoded: false))
-                Text("Nothing leaves this Mac. Speech and cleanup run on-device.").font(.callout).foregroundStyle(.secondary)
-            }
-            .id(refresh)
-            Section("About") {
-                LabeledContent("Version", value: Version.text)
             }
         }
         .formStyle(.grouped)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh += 1 }
     }
+}
 
-    private func chooseVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Use This Folder"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Your Dictionary comes along to the new folder.
-        let words = Words.url
-        jotDefaults.set(url.path(percentEncoded: false), forKey: "vaultPath")
-        if !FileManager.default.fileExists(atPath: Words.url.path) {
-            try? FileManager.default.createDirectory(at: Words.url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? FileManager.default.copyItem(at: words, to: Words.url)
-        }
-        Words.shared.load()
-        refresh += 1
+/// The vault (notes folder) Glyph Jot saves to, changed. Your Dictionary comes along.
+@MainActor func chooseNotesVault() -> Bool {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.prompt = "Use This Folder"
+    panel.message = "Choose your vault (a Glyph Bot vault, an Obsidian vault or any folder)"
+    guard panel.runModal() == .OK, let url = panel.url else { return false }
+    let words = Words.url
+    jotDefaults.set(url.path(percentEncoded: false), forKey: "vaultPath")
+    if !FileManager.default.fileExists(atPath: Words.url.path) {
+        try? FileManager.default.createDirectory(at: Words.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.copyItem(at: words, to: Words.url)
     }
+    Words.shared.load()
+    return true
 }
 
 private struct Shortcut: View {
@@ -114,7 +84,7 @@ private struct Shortcut: View {
     var body: some View { LabeledContent(keys, value: does) }
 }
 
-private struct Grant: View {
+struct Grant: View {
     let name: String
     let why: String
     let ok: Bool

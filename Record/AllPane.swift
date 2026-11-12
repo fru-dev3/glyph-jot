@@ -1,115 +1,149 @@
 import GlyphCore
 import SwiftUI
 
-/// All: a calm summary across notes, dictations and recordings. Ask on top, the three kinds
-/// with their counts, the latest captures (or what the search finds), and what is filed
-/// under which Glyph Studio object.
+/// Home: a day at a time. The fortnight on a rail with a dot on the days you jotted, what the
+/// chosen day holds, then the captures themselves grouped by their day, newest first.
+///
+/// The three counting tiles that used to sit here are gone: the sidebar already counts Notes,
+/// Dictations and Recordings, and one count system across every screen means saying it once.
+/// Asking moved to Chat, where a question keeps its thread.
 struct AllPane: View {
     @Environment(AppModel.self) private var model
     @State private var store = NoteStore.shared
     @State private var dictations: [HistoryView.Entry] = []
-    @State private var question = ""
-    @FocusState private var asking: Bool
-    private let ask = Ask.shared
+    @State private var day = Calendar.current.startOfDay(for: .now)
+
+    /// How many rows the window holds at once. It is a window onto the vault, not the vault.
+    private static let rows = 120
 
     var body: some View {
         let search = model.searchText.trimmingCharacters(in: .whitespaces)
         let all = captures
-        let shown = search.isEmpty ? Array(all.prefix(12)) : matches(all, search)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("All").font(.system(size: 30, weight: .bold))
-                    Text("Everything you captured, and where it is filed in Glyph Studio")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                }
-                askBar
-                if !ask.question.isEmpty { AskCard(copied: .constant(nil)) }
-                tiles(all)
-                section(search.isEmpty ? "Recent" : "Matches for \u{201C}\(search)\u{201D}", count: search.isEmpty ? nil : shown.count) {
-                    if shown.isEmpty {
-                        Text(search.isEmpty ? "Nothing captured yet. Hold Fn to jot, or press Record." : "Nothing you captured says that.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
+        GeometryReader { geo in
+            let wide = geo.size.width >= 900
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    title
+                        .padding(.bottom, 18)
+                    DayStrip(days: strip(all), selected: $day)
+                        .padding(.bottom, 14)
+                    dayLine(all)
+                        .padding(.bottom, 16)
+                    if search.isEmpty {
+                        groups(upTo(all), wide: wide)
                     } else {
-                        VStack(spacing: 2) {
-                            ForEach(shown) { CaptureRow(capture: $0) }
-                        }
+                        found(matches(all, search), search, wide: wide)
                     }
                 }
-                filed
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 30)
+                .padding(.top, 26)
+                .padding(.bottom, 40)
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.top, 26)
-            .padding(.bottom, 40)
-            .frame(maxWidth: .infinity)
+            .scrollEdgeEffectStyle(.soft, for: .top)
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
         .background(Color(nsColor: .textBackgroundColor))
         .task { dictations = HistoryView.load() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in dictations = HistoryView.load() }
     }
 
-    // MARK: ask
+    // MARK: the day
 
-    private var askBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.tint)
-                TextField("Ask anything about what you captured", text: $question)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15))
-                    .focused($asking)
-                    .onSubmit(run)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 40)
-            .background(.background, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(asking ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.25)))
-            Button("Ask", action: run)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty || ask.busy)
+    private var calendar: Calendar { .current }
+    private var isToday: Bool { calendar.isDateInToday(day) }
+
+    private var title: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(dayName(day))
+                .font(.system(size: 30, weight: .bold))
+            SectionHeading(title: day.formatted(.dateTime.month(.wide).year()))
+            Spacer(minLength: 8)
+            if streak >= 2 { StreakChip(days: streak) }
         }
     }
 
-    private func run() {
-        let q = question.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        let sources = Self.askSources(model, dictations: dictations)
-        Task { await ask.run(q, over: sources, show: false) }
+    private func dayName(_ date: Date) -> String {
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        // Inside the week it is enough to say the weekday; beyond it, say the date.
+        let days = calendar.dateComponents([.day], from: date, to: .now).day ?? 0
+        return days < 7 ? date.formatted(.dateTime.weekday(.wide)) : date.formatted(.dateTime.month(.abbreviated).day())
     }
 
-    /// What Ask reads: every dictation, note and recording (its title, links and summary).
-    static func askSources(_ model: AppModel, dictations: [HistoryView.Entry]? = nil) -> [HistoryView.Entry] {
-        let notes = NoteStore.shared.notes.map {
-            HistoryView.Entry(at: $0.date, text: $0.text, heard: nil, mode: "note", app: "Notes", project: nil, device: $0.device, seconds: 0)
+    /// The chosen day in one line: how much of it there is. Nothing is invented: a Mac does not
+    /// move, so there are no places to count here as there are on the phone.
+    private func dayLine(_ all: [Capture]) -> some View {
+        let today = all.filter { calendar.isDate($0.date, inSameDayAs: day) }
+        let seconds = today.reduce(0) { $0 + $1.seconds }
+        return HStack(spacing: 16) {
+            Text("\(today.count) jot\(today.count == 1 ? "" : "s")")
+            if seconds > 0 { Text("\(Format.duration(Int(seconds))) recorded") }
+            if today.isEmpty { Text(isToday ? "Hold Fn to jot, or press Record" : "Nothing this day") }
         }
-        let recordings = model.library.conversations.prefix(200).map { c in
-            let summary = model.vault.notes(c.id).summary
-            let filed = c.links.map(model.studio.name).joined(separator: ", ")
-            return HistoryView.Entry(at: Format.date(c.created) ?? .distantPast, text: [c.title, filed, summary].filter { !$0.isEmpty }.joined(separator: ". "),
-                                     heard: nil, mode: "recording", app: "Recording", project: nil, device: c.device, seconds: Double(c.durationSec))
-        }
-        return (dictations ?? HistoryView.load()) + notes + recordings
+        .font(.system(size: 12.5))
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
     }
 
-    // MARK: the three kinds
+    /// The fortnight ending today, each day with how many captures it holds.
+    private func strip(_ all: [Capture]) -> [DayStrip.Day] {
+        var counts: [Date: Int] = [:]
+        for c in all { counts[calendar.startOfDay(for: c.date), default: 0] += 1 }
+        let today = calendar.startOfDay(for: .now)
+        return (0..<14).reversed().compactMap { back in
+            guard let date = calendar.date(byAdding: .day, value: -back, to: today) else { return nil }
+            return DayStrip.Day(date: date, count: counts[date] ?? 0)
+        }
+    }
+
+    /// Days in a row, ending today or yesterday, with something captured on each.
+    private var streak: Int {
+        let days = Set(captures.map { calendar.startOfDay(for: $0.date) })
+        let today = calendar.startOfDay(for: .now)
+        guard let start = days.contains(today) ? today : calendar.date(byAdding: .day, value: -1, to: today),
+              days.contains(start) else { return 0 }
+        var n = 0
+        var cursor = start
+        while days.contains(cursor) {
+            n += 1
+            guard let before = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = before
+        }
+        return n
+    }
+
+    // MARK: the captures
 
     var captures: [Capture] { Self.captures(model, notes: store.notes, dictations: dictations) }
 
     static func captures(_ model: AppModel, notes: [JotNote], dictations: [HistoryView.Entry]) -> [Capture] {
-        let recordings = model.library.conversations.map {
-            Capture(kind: .recording, id: $0.id, title: $0.title, date: Format.date($0.created) ?? .distantPast, links: $0.links)
+        let recordings = model.library.conversations.map { c in
+            Capture(kind: .recording, id: c.id, title: c.title, date: Format.date(c.created) ?? .distantPast,
+                    links: c.links, tags: c.tags, seconds: Double(c.durationSec),
+                    kept: model.stage(c.id) == nil)
         }
-        let notes = notes.map { Capture(kind: .note, id: $0.file, title: $0.title, date: $0.date, links: $0.links) }
+        let written = notes.map {
+            Capture(kind: .note, id: $0.file, title: $0.title, date: $0.date, links: $0.links, tags: $0.tags,
+                    snippet: snippet($0.text, after: $0.title))
+        }
         let said = dictations.filter { $0.mode != "ask" }.map {
-            Capture(kind: .dictation, id: $0.id, title: String($0.text.prefix(120)), date: $0.at, links: [])
+            Capture(kind: .dictation, id: $0.id, title: String($0.text.prefix(120)), date: $0.at,
+                    seconds: $0.seconds)
         }
-        return (recordings + notes + said).sorted { $0.date > $1.date }
+        return (recordings + written + said).sorted { $0.date > $1.date }
+    }
+
+    /// The words after the title: what the row's second column shows.
+    private static func snippet(_ text: String, after title: String) -> String {
+        let body = text.hasPrefix(title) ? String(text.dropFirst(title.count)) : text
+        return body.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// From the chosen day backwards: the days under it are still there, which is what a rail over
+    /// a list means.
+    private func upTo(_ all: [Capture]) -> [Capture] {
+        let end = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+        return Array(all.filter { $0.date < end }.prefix(Self.rows))
     }
 
     private func matches(_ all: [Capture], _ search: String) -> [Capture] {
@@ -125,114 +159,229 @@ struct AllPane: View {
         }.prefix(50))
     }
 
-    private func tiles(_ all: [Capture]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-            tile("Notes", "note.text", .notes, all.filter { $0.kind == .note })
-            tile("Dictations", "text.cursor", .dictations, all.filter { $0.kind == .dictation })
-            tile("Recordings", "waveform", .recordings, all.filter { $0.kind == .recording })
-        }
-    }
-
-    private func tile(_ title: String, _ symbol: String, _ item: SidebarItem, _ items: [Capture]) -> some View {
-        Button { model.sidebar = item } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(title, systemImage: symbol)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text(items.count.formatted())
-                    .font(.system(size: 28, weight: .bold))
-                    .monospacedDigit()
-                Text(items.first.map { "Latest " + Format.shortDate($0.date.ISO8601Format()) } ?? "None yet")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .help("Open \(title)")
-    }
-
-    // MARK: filed in Studio
-
-    private var filed: some View {
-        let counts = model.linkCounts.objects
-        return section("Filed in Glyph Studio", count: nil) {
-            if counts.isEmpty {
-                Text("Nothing filed yet. Open a note or a recording and press + to file it under a domain, person, product or project.")
+    @ViewBuilder private func found(_ shown: [Capture], _ search: String, wide: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            SectionHeading(title: "Matches", detail: search, trailing: shown.count.formatted())
+                .padding(.bottom, 7)
+            if shown.isEmpty {
+                Text("Nothing you captured says that.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 8)
             } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(StudioObject.Kind.listed, id: \.self) { kind in
-                        let ids = counts.keys.filter { StudioObject.Kind(id: $0) == kind }
-                            .sorted { counts[$0]! != counts[$1]! ? counts[$0]! > counts[$1]! : model.studio.name($0) < model.studio.name($1) }
-                        if !ids.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(kind.label).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
-                                FlowLayout(spacing: 6, lineSpacing: 6) {
-                                    ForEach(ids, id: \.self) { id in CountChip(link: .object(id), count: counts[id] ?? 0) }
-                                }
-                            }
+                ForEach(shown) { CaptureRow(capture: $0, wide: wide) }
+            }
+        }
+    }
+
+    /// One block a day, with the day said once at its head. The chosen day needs no head: the
+    /// title and the line above it have already said which day it is and how much it holds.
+    @ViewBuilder private func groups(_ shown: [Capture], wide: Bool) -> some View {
+        let blocks = Dictionary(grouping: shown) { calendar.startOfDay(for: $0.date) }
+            .sorted { $0.key > $1.key }
+        if shown.isEmpty {
+            EmptyState(symbol: "waveform", title: "Nothing captured yet",
+                       message: "Hold Fn to jot where you are, Fn and Shift to save a note, or press Record.")
+                .frame(maxWidth: .infinity, minHeight: 280)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(blocks, id: \.key) { date, items in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !calendar.isDate(date, inSameDayAs: day) {
+                            SectionHeading(title: dayName(date),
+                                           detail: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
+                                           trailing: items.count.formatted())
+                                .padding(.top, 10)
+                                .padding(.bottom, 7)
                         }
+                        ForEach(items) { CaptureRow(capture: $0, wide: wide) }
                     }
                 }
             }
         }
     }
 
-    private func section<C: View>(_ title: String, count: Int?, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title).font(.system(size: 20, weight: .semibold))
-                if let count { Text(count.formatted()).font(.system(size: 14)).foregroundStyle(.secondary).monospacedDigit() }
-            }
-            content()
+    /// What Ask reads: every dictation, note and recording (its title, links and summary).
+    static func askSources(_ model: AppModel, dictations: [HistoryView.Entry]? = nil) -> [HistoryView.Entry] {
+        let notes = NoteStore.shared.notes.map {
+            HistoryView.Entry(at: $0.date, text: $0.text, heard: nil, mode: "note", app: "Notes", project: nil, device: $0.device, seconds: 0)
         }
+        let recordings = model.library.conversations.prefix(200).map { c in
+            let summary = model.vault.notes(c.id).summary
+            let filed = c.links.map(model.studio.name).joined(separator: ", ")
+            return HistoryView.Entry(at: Format.date(c.created) ?? .distantPast, text: [c.title, filed, summary].filter { !$0.isEmpty }.joined(separator: ". "),
+                                     heard: nil, mode: "recording", app: "Recording", project: nil, device: c.device, seconds: Double(c.durationSec))
+        }
+        return (dictations ?? HistoryView.load()) + notes + recordings
     }
 }
 
-/// One capture in All: its kind, title, when, and what it is filed under. Click opens it.
+/// The fortnight: a weekday letter, the date, and a dot on the days you jotted. Today is filled
+/// with the accent. Never a shade that deepens with the count: a shade does not say whether a day
+/// happened, and green shading would fight a red waveform.
+struct DayStrip: View {
+    struct Day: Identifiable, Hashable {
+        var date: Date
+        var count: Int
+        var id: Date { date }
+    }
+
+    let days: [Day]
+    @Binding var selected: Date
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var calendar: Calendar { .current }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(days) { day in
+                cell(day)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func cell(_ day: Day) -> some View {
+        let today = calendar.isDateInToday(day.date)
+        let chosen = calendar.isDate(day.date, inSameDayAs: selected)
+        return Button {
+            withAnimation(.glyph(reduceMotion)) { selected = calendar.startOfDay(for: day.date) }
+        } label: {
+            VStack(spacing: 2) {
+                Text(day.date.formatted(.dateTime.weekday(.narrow)))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(today ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
+                Text(day.date.formatted(.dateTime.day()))
+                    .font(.system(size: 16, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(today ? AnyShapeStyle(.white) : day.count > 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                Circle()
+                    .fill(today ? AnyShapeStyle(.white) : day.count > 0 ? AnyShapeStyle(Color.glyphGreenText) : AnyShapeStyle(.clear))
+                    .frame(width: 4, height: 4)
+            }
+            // 46 x 58 drawn; the hit area is the 44 the finger and the pointer both need.
+            .frame(width: 46, height: 58)
+            .background {
+                let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                if today {
+                    shape.fill(Color.accentColor)
+                } else {
+                    shape.fill(day.count > 0 ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.quaternary.opacity(0.3)))
+                    shape.strokeBorder(.separator.opacity(0.7))
+                }
+                if chosen, !today { shape.strokeBorder(Color.accentColor, lineWidth: 2) }
+            }
+            .overlay {
+                if chosen, today {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.9), lineWidth: 2)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+                            + ", " + (day.count > 0 ? "\(day.count) jots" : "nothing"))
+        .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
+        .help(day.count > 0 ? "\(day.count) captured" : "Nothing captured")
+    }
+}
+
+/// Days in a row with something captured. Not a tick: a run of days is not vault state.
+struct StreakChip: View {
+    let days: Int
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tint)
+            Text("\(days) days")
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.glyphGreenText)
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 26)
+        .background(Color.accentColor.opacity(0.12), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.3)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(days) days in a row")
+        .help("\(days) days in a row with something captured")
+    }
+}
+
+/// One capture: what kind it is, its title, its first words, the tag it is filed under, when, and
+/// its vault state as ticks. Click opens it.
 struct CaptureRow: View {
     let capture: Capture
+    var wide = true
     @Environment(AppModel.self) private var model
     @State private var hover = false
+    @State private var summary = ""
 
     var body: some View {
         Button { model.open(capture) } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Image(systemName: capture.symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 28, height: 28)
-                    .background(Color.accentColor.opacity(0.10), in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(capture.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    HStack(spacing: 6) {
-                        Text(capture.kind.rawValue.capitalized + " \u{00B7} " + Format.shortDate(capture.date.ISO8601Format()))
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize()
-                        ForEach(capture.links.prefix(3), id: \.self) { LinkChip(link: .object($0), size: .small).fixedSize() }
-                        if capture.links.count > 3 {
-                            Text("+\(capture.links.count - 3)").font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
-                        }
-                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                Text(capture.title)
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .lineLimit(1)
+                    .frame(width: wide ? 320 : nil, alignment: .leading)
+                    .frame(maxWidth: wide ? nil : .infinity, alignment: .leading)
+                if wide {
+                    Text(snippet)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
+                if let tag = capture.tags.first {
+                    HStack(spacing: 2) {
+                        Text("#")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(CanonicalTags.color(tag) ?? .secondary)
+                            .accessibilityHidden(true)
+                        Text(tag).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .fixedSize()
+                }
+                Text(capture.date.formatted(.dateTime.hour().minute()))
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 58, alignment: .trailing)
+                VaultTicks(kept: capture.kept)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(hover ? Color.secondary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.vertical, 12)
+            .background(hover ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(alignment: .top) { Divider() }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .help("Open this \(capture.kind.rawValue)")
+        // A recording's own words are in its summary file: read for the rows on screen only.
+        .task(id: capture.id) {
+            guard capture.kind == .recording, wide else { return }
+            let vault = model.vault
+            let id = capture.id
+            summary = await Task.detached(priority: .utility) { vault.notes(id).summary }.value
+        }
+    }
+
+    /// A recording says its words when it has them, and what it is still doing when it does not.
+    private var snippet: String {
+        if !capture.snippet.isEmpty { return capture.snippet }
+        if !summary.isEmpty { return summary }
+        var parts: [String] = []
+        if capture.seconds > 0 { parts.append(Format.duration(Int(capture.seconds))) }
+        if let stage = model.stage(capture.id) { parts.append(stage.help.lowercased()) }
+        return parts.joined(separator: " \u{00B7} ")
     }
 }
 

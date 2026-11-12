@@ -63,6 +63,9 @@ The on-disk truth. Every other module reads/writes these exact shapes. No DB.
   ]
 }
 ```
+`speaker` is a voice id, `S1`, `S2`... in the order they first speak (an on-device diarizer
+finds them; empty when none ran). `speakers` holds the names given to them; a voice with no
+name reads as "Speaker 2". Voices under 2% of the talking are folded away.
 `transcript.txt` = derived: `[mm:ss] Speaker: text` lines. Always regenerated from json.
 
 ## notes.md  (Markdown is source of truth for summary + tasks)
@@ -116,7 +119,7 @@ and topic `tags` in meta.json; each person and account also has a note:
 ---
 kind: person
 account: Northwind
-aliases: [Sam, S. Chen]
+aliases: [Ken, S. Chen]
 ---
 
 Free notes about Sarah.
@@ -149,34 +152,45 @@ byte, and Memosa's `vault_report` reads them exactly as `glyphcore-report` does.
   when taken). Nothing in GlyphCore removes a conversation, a note or audio, and there is no
   retention policy.
 
-## Studio links (v3, Glyph Jot 0.7.12)
-Glyph Jot captures context and files it into Glyph Studio. It keeps no people or companies
-of its own: a capture links to Studio's objects by Studio's ids, and Studio owns them.
+## Glyph CRM links (v4, Glyph Jot 0.7.16; v3 was Studio links, 0.7.12)
+Glyph Jot captures context and links it to Glyph CRM's entities. It keeps no people or
+companies of its own: a capture names an entity by its permanent id, and the page is the CRM's.
+Files only, no database.
 
 ```
-<studio vault>/data/
+<vault>/data/
 ├─ entities/people/<slug>/entity.md    # People     id person/<slug>
-├─ entities/orgs/<slug>/entity.md      # Products   id org/<slug>   (a company)
+├─ entities/places/<slug>/entity.md    # Places     id place/<slug>
+├─ entities/orgs/<slug>/entity.md      # Products   id org/<slug>   (every company is a product)
+├─ entities/things/<slug>/entity.md    # Things     id thing/<slug>
 ├─ apps/<id>/manifest.json             # Products   an app: shown on its company's row when its
 │                                      #            `company`, id or `title`/`name` slugs to an
 │                                      #            org; else its own row, id org/<slug of title>
-├─ missions/<slug>/mission.md          # Projects   id mission/<slug>
+├─ missions/<slug>/mission.md          # Projects   id mission/<slug> (Glyph Bot's)
 └─ domains/<slug>/manifest.json        # Domains    id domain/<slug> (name: identity.label)
 ```
-- Entity pages carry front matter `name:` and `aliases: [a, b]`; an older vault's flat
-  `<slug>.md` still reads. Folders starting with `_` or `.` are not objects.
+- Entity pages carry front matter `name:`, `aliases: [a, b]` and, from the CRM, a permanent
+  `id: person/ken-lee` that survives a rename; when present it is the id. An older vault's
+  flat `<slug>.md` still reads. Folders starting with `_` or `.` are not objects.
 - Slug: lower case, anything but a-z and 0-9 becomes `-`, no `-` at the ends.
-- Glyph Jot only reads these. A new person or product is made with Studio's own
-  `prevail entities create --kind person|org` (stdin `{"draft": {"name": ..., "notes": ...}}`);
-  links between Studio objects are Studio's (`prevail entities link`), never Jot's.
-- meta.json gains `"links": ["person/sam-lee", "org/acme", "mission/launch", "domain/career"]`
-  after `tags`, and `suggested` gains `"links"` first (Studio objects the call names; its
-  `people` are now only names with no Studio page yet). Both are left out when empty, so a
-  file without links is byte for byte the v2 file.
-- A note (`<studio vault>/data/domains/notes/source/jot/*.md`) gains `links: [...]` in its
-  front matter; its `tags` stay.
-- `#tags` stay plain: Studio has no tags.
-- Moving a v2 vault: each name in `people` and `accounts` (through its note's aliases) becomes
-  the Studio id with that name or alias, or one Studio makes; the People and Accounts notes
-  move to `.memosa/migrated-to-studio/` (never deleted), with a line per run in its `log.jsonl`.
-  Names Studio can't take stay where they were. Older `suggested.accounts` are dropped.
+- A new person, place, product or thing picked in Jot is written as the CRM's own new page
+  (`name, kind, aliases: [], saved: true, created, updated, mention_count: 0, id`, then
+  `## Your notes` and `## Conversations`), in a free slug (`-2`, `-3`). An entity that already
+  answers to the name is used instead. Links between entities are the CRM's, never Jot's.
+- Two entities that answer to one name ("Which John?") are shown with their slug; Jot never picks.
+- meta.json keeps `"links": ["person/ken-lee", "org/acme", "mission/launch", "domain/career"]`
+  after `tags`, and `suggested` gains `"links"` first. Both are left out when empty. Its
+  `notes.md` front matter repeats `tags` and `entities: [...]` (kept in step on every change).
+- A note (`<vault>/data/domains/notes/source/jot/*.md`) carries `entities: [person/ken-lee]`
+  and `tags: [knowledge]` in its own front matter: the key the CRM's timeline reads. Older
+  notes said `links:`; it still reads and becomes `entities:` on the next change. Tags a note
+  already has stay as written; new ones are tidied (`#Q4 Renewal` is `q4-renewal`).
+- A note can be filed to one life domain: `domain: health` in its front matter (a folder name
+  under `data/domains/`). Saying it first files it as you jot ("Health: ...", "For career, ...";
+  the lead-in is taken off the words), or pick it after from the note's domain chip. The note stays
+  in the notes folder.
+- Older notes: Link Older Notes proposes the entities each note names (four letters or more),
+  in batches of 25 you accept; a no is remembered in `data/apps/jot/link-review.json`.
+- Moving a v2 vault: each name in `people` and `accounts` becomes the entity with that name
+  or alias, or a new page; the People and Accounts notes move to
+  `.memosa/migrated-to-studio/` (never deleted), with a line per run in its `log.jsonl`.
