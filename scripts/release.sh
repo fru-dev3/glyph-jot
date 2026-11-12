@@ -19,11 +19,23 @@ xcodebuild -project Jot.xcodeproj -scheme JotMac -configuration Release -derived
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$identity" DEVELOPMENT_TEAM="$team" OTHER_CODE_SIGN_FLAGS=--timestamp \
   CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO build # no get-task-allow: notarization refuses it
 app=build/Build/Products/Release/Jot.app
-codesign --verify --strict --deep "$app"
-# A public build carries no source path (the user name, home folder).
-for bin in "$app/Contents/MacOS/"* "$app/Contents/Helpers/"*/Contents/MacOS/*; do
-  if strings -a "$bin" | grep -q '^/Use[r]s/'; then echo "source paths left in $bin"; exit 1; fi
+# The linker's debug map and SwiftPM's baked resource-bundle path carry the build machine's user name and
+# home folder. Strip the symbols, blank that path (same length), and sign again, the engine first.
+for bin in "$app/Contents/MacOS/Jot" "$app/Contents/Helpers/Glyph Jot Dictation.app/Contents/MacOS/Glyph Jot Dictation"; do
+  strip -S -x "$bin"
+  python3 - "$bin" <<'PY'
+import re, sys
+p = sys.argv[1]; b = open(p, "rb").read()
+b = re.sub(rb"/Use[r]s/[ -~]*?\.bundle", lambda m: (b"/nonexistent" + b"/" * len(m.group(0)))[:len(m.group(0))], b)
+open(p, "wb").write(b)
+PY
 done
+for t in "$app/Contents/Helpers/Glyph Jot Dictation.app" "$app"; do
+  codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "$identity" "$t"
+done
+# Nothing of the build machine may be left in the app.
+if grep -rqa '/Use[r]s/' "$app"; then echo "source paths left in the app"; grep -rla '/Use[r]s/' "$app"; exit 1; fi
+codesign --verify --strict --deep "$app"
 engine_sig=$(codesign -dvv "$app/Contents/Helpers/Glyph Jot Dictation.app" 2>&1)
 [[ $engine_sig == *"Developer ID Application"* ]] || { echo "the engine is not Developer ID signed"; exit 1; }
 
